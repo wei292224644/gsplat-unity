@@ -12,6 +12,8 @@ namespace Gsplat
     {
         const string k_gsplatSettingsResourcesPath = "GsplatSettings";
 
+        const float k_defaultOffscreenScale = 0.5f;
+
         const string k_gsplatSettingsPath =
             "Assets/Gsplat/Settings/Resources/" + k_gsplatSettingsResourcesPath + ".asset";
 
@@ -42,9 +44,15 @@ namespace Gsplat
                     // Checked outside the version ladder below: those branches are chained with
                     // else-if, so an asset upgrading from an early version takes one branch, stamps
                     // the current version, and never picks up fields added by the later ones.
-                    if (!settings.CompositeShader)
+                    if (!settings.CompositeShader || settings.OffscreenScale <= 0f)
                     {
-                        settings.CompositeShader = DefaultCompositeShader;
+                        if (!settings.CompositeShader)
+                            settings.CompositeShader = DefaultCompositeShader;
+                        // An asset serialised before this field existed reads back as 0, which is
+                        // not a resolution. Treat it as "never set" rather than clamping it to the
+                        // range minimum, which would silently pick a scale nobody chose.
+                        if (settings.OffscreenScale <= 0f)
+                            settings.OffscreenScale = k_defaultOffscreenScale;
                         EditorUtility.SetDirty(settings);
                         AssetDatabase.SaveAssets();
                     }
@@ -82,6 +90,13 @@ namespace Gsplat
 
         [Tooltip("Resolves the offscreen gsplat target into the camera target. Required under URP.")]
         public Shader CompositeShader;
+
+        [Tooltip(
+            "Size of the offscreen gsplat target as a fraction of camera resolution. Splats are soft "
+            + "by construction, so they tolerate this far better than geometry or UI, which stay at "
+            + "full resolution. 1 renders at camera resolution.")]
+        [Range(0.25f, 1f)]
+        public float OffscreenScale;
 
         [Tooltip(
             "When enabled, 2+ active Gaussian splat renderers are merged into a single globally depth-sorted draw call.")]
@@ -150,6 +165,7 @@ namespace Gsplat
             ComputeShader = DefaultComputeShader;
             GlobalMaterial = DefaultGlobalMaterial;
             CompositeShader = DefaultCompositeShader;
+            OffscreenScale = k_defaultOffscreenScale;
             Materials = DefaultMaterials;
             SplatInstanceSize = 128;
             UploadBatchSize = 100000;

@@ -45,6 +45,10 @@ const float4 discardVec = float4(0.0, 0.0, 2.0, 1.0);
 // Pipelines with no gsplat pass (BiRP, HDRP) leave this at 0 and keep the old behaviour exactly.
 int _GsplatOffscreen;
 
+// Scales normalised target coordinates into the region of _CameraDepthTexture actually in use;
+// it is an RTHandle and may be allocated larger. Set alongside _GsplatOffscreen by the pass.
+float4 _GsplatDepthUvScale;
+
 UNITY_DECLARE_DEPTH_TEXTURE(_CameraDepthTexture);
 
 // The offscreen target is defined to be in gamma space, because 3DGS colours were fit against an
@@ -66,15 +70,16 @@ float3 GsplatToTargetSpace(float3 c, bool srcIsGamma)
 // camera depth's sample count, so sharing it is not possible. Occlusion against opaque geometry is
 // therefore tested here instead of by the depth unit. Mirrors ZTest LEqual, which the compiler
 // turns into GEqual on reversed-Z platforms.
-// ponytail: uses _ScreenParams, which equals the offscreen size only while it is allocated at full
-// camera resolution. Dropping the target to a fraction of that must override _ScreenParams for the
-// pass — InitCorner's focal term reads it too, and wants the same override.
+// _ScreenParams is the offscreen target's size here, not the camera's — the pass overrides it for
+// the duration of the splat draws, so that this and InitCorner's focal term agree on what a pixel
+// is. The depth texture stays at camera resolution; normalised coordinates bridge the two.
 bool GsplatOccluded(float4 svPosition)
 {
     if (!_GsplatOffscreen)
         return false;
 
-    float sceneDepth = SAMPLE_DEPTH_TEXTURE(_CameraDepthTexture, svPosition.xy / _ScreenParams.xy);
+    float2 uv = svPosition.xy / _ScreenParams.xy * _GsplatDepthUvScale.xy;
+    float sceneDepth = SAMPLE_DEPTH_TEXTURE(_CameraDepthTexture, uv);
     #if UNITY_REVERSED_Z
     return svPosition.z < sceneDepth;
     #else

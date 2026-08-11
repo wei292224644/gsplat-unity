@@ -65,17 +65,25 @@ namespace Gsplat
             // is meant to buy back.
             const GraphicsFormat k_offscreenFormat = GraphicsFormat.R16G16B16A16_SFloat;
 
+            // Below this the composite's bilinear upsample stops hiding the loss and splat edges
+            // visibly step. Matches the range on GsplatSettings.OffscreenScale.
+            const float k_minOffscreenScale = 0.25f;
+
             const string k_offscreenPassName = "Gsplat.Offscreen";
             const string k_compositePassName = "Gsplat.Composite";
             const string k_offscreenTextureName = "_GsplatOffscreen";
 
             static readonly int k_gsplatOffscreen = Shader.PropertyToID("_GsplatOffscreen");
+            static readonly int k_gsplatDepthUvScale = Shader.PropertyToID("_GsplatDepthUvScale");
+            static readonly int k_screenParams = Shader.PropertyToID("_ScreenParams");
 
             public Material CompositeMaterial;
 
             class DrawPassData
             {
                 public TextureHandle Target;
+                public Vector4 TargetScreenParams;
+                public Vector4 CameraScreenParams;
             }
 
             class CompositePassData
@@ -94,6 +102,9 @@ namespace Gsplat
                 ConfigureInput(ScriptableRenderPassInput.Depth);
             }
 
+            static Vector4 ScreenParams(int width, int height) =>
+                new(width, height, 1f + 1f / width, 1f + 1f / height);
+
             public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
             {
                 if (!CompositeMaterial)
@@ -103,12 +114,19 @@ namespace Gsplat
                 var cameraData = frameData.Get<UniversalCameraData>();
 
                 var desc = cameraData.cameraTargetDescriptor;
+                var cameraWidth = desc.width;
+                var cameraHeight = desc.height;
+
                 desc.graphicsFormat = k_offscreenFormat;
                 desc.depthBufferBits = 0;
                 desc.msaaSamples = 1;
                 desc.useMipMap = false;
                 desc.autoGenerateMips = false;
                 desc.bindMS = false;
+
+                var scale = Mathf.Clamp(GsplatSettings.Instance.OffscreenScale, k_minOffscreenScale, 1f);
+                desc.width = Mathf.Max(1, Mathf.RoundToInt(cameraWidth * scale));
+                desc.height = Mathf.Max(1, Mathf.RoundToInt(cameraHeight * scale));
 
                 var offscreen = UniversalRenderer.CreateRenderGraphTexture(renderGraph, desc,
                     k_offscreenTextureName, false, FilterMode.Bilinear, TextureWrapMode.Clamp);
@@ -117,6 +135,8 @@ namespace Gsplat
                        renderGraph.AddUnsafePass<DrawPassData>(k_offscreenPassName, out var passData))
                 {
                     passData.Target = offscreen;
+                    passData.TargetScreenParams = ScreenParams(desc.width, desc.height);
+                    passData.CameraScreenParams = ScreenParams(cameraWidth, cameraHeight);
                     builder.UseTexture(offscreen, AccessFlags.Write);
                     builder.UseTexture(resourceData.cameraDepthTexture, AccessFlags.Read);
                     // The draws are recorded through GsplatSorter, so the graph cannot see that
@@ -128,10 +148,19 @@ namespace Gsplat
                         var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
                         CoreUtils.SetRenderTarget(cmd, data.Target, ClearFlag.Color, Color.clear);
                         cmd.SetGlobalInteger(k_gsplatOffscreen, 1);
+                        // The splat shaders size themselves in target pixels: InitCorner derives the
+                        // projected footprint and its below-2-pixel cull from _ScreenParams, and the
+                        // occlusion test normalises SV_Position by it. Left at the camera's value the
+                        // splats would be laid out for a resolution this target does not have.
+                        cmd.SetGlobalVector(k_screenParams, data.TargetScreenParams);
+                        // _CameraDepthTexture is an RTHandle and may be larger than the region in
+                        // use, so normalised coordinates need scaling into the used part.
+                        cmd.SetGlobalVector(k_gsplatDepthUvScale, RTHandles.rtHandleProperties.rtHandleScale);
                         GsplatSorter.Instance.RecordDraws(cmd);
                         // Restore, so anything else drawing these materials this frame (BiRP-style
                         // immediate submissions, editor preview cameras) keeps the old behaviour.
                         cmd.SetGlobalInteger(k_gsplatOffscreen, 0);
+                        cmd.SetGlobalVector(k_screenParams, data.CameraScreenParams);
                     });
                 }
 
