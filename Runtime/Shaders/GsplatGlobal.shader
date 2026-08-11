@@ -20,7 +20,8 @@ Shader "Gsplat/Global"
         Pass
         {
             ZWrite Off
-            Blend One OneMinusSrcAlpha
+            // Under operator — see Gsplat.shader.
+            Blend OneMinusDstAlpha One
             Cull Off
 
             HLSLPROGRAM

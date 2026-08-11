@@ -314,7 +314,7 @@ namespace Gsplat
         /// <summary>
         /// Record the prepared draw into a command buffer whose render target the caller owns.
         /// </summary>
-        public void RecordDraw(CommandBuffer cmd)
+        public void RecordDraw(RasterCommandBuffer cmd)
         {
             if (!m_drawReady)
                 return;

@@ -179,7 +179,7 @@ namespace Gsplat
             m_renderer.PrepareDraw(transform, gameObject.layer, GammaToLinear, SHDegree, Brightness,
                 1.0f - SplatDownscaleFactor, RenderOrder);
 
-        public void RecordDraw(CommandBuffer cmd)
+        public void RecordDraw(RasterCommandBuffer cmd)
         {
             if (m_renderer == null || !Valid || !GsplatSettings.Instance.Valid || !GsplatSorter.Instance.Valid)
                 return;

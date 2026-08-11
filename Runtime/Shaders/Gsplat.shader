@@ -15,7 +15,11 @@ Shader "Gsplat/Standard"
         Pass
         {
             ZWrite Off
-            Blend One OneMinusSrcAlpha
+            // Under operator, the front-to-back counterpart of One / OneMinusSrcAlpha:
+            //   rgb += (1 - dst.a) * src.rgb      a += (1 - dst.a) * src.a
+            // Algebraically the same composite; the difference is that dst.a now grows towards 1
+            // from the nearest layer outwards, so it can be tested to stop shading hidden layers.
+            Blend OneMinusDstAlpha One
             Cull Off
 
             HLSLPROGRAM
@@ -63,6 +67,13 @@ Shader "Gsplat/Standard"
 
                 if (source.order >= _SplatCount)
                     return false;
+
+                // The sort leaves _OrderBuffer back-to-front; walking it backwards gives
+                // front-to-back, which is what the under operator composites in. Same result either
+                // way — the over operator is associative — but front-to-back is the order in which
+                // accumulated alpha saturates from the front, which is the only order an early-out
+                // can exploit.
+                source.order = uint(_SplatCount - 1) - source.order;
 
                 source.id = _OrderBuffer[source.order];
                 source.cornerUV = float2(v.vertex.x, v.vertex.y) * _ScaleFactor;

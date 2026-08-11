@@ -519,7 +519,7 @@ namespace Gsplat
         /// Record the merged draw into a command buffer whose render target the caller owns.
         /// Prepares here rather than in Update so the instance count comes from this frame's merge.
         /// </summary>
-        public void RecordDraw(CommandBuffer cmd)
+        public void RecordDraw(RasterCommandBuffer cmd)
         {
             if (!PrepareDraw())
                 return;

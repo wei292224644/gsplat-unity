@@ -23,8 +23,12 @@ namespace Gsplat
         /// Record this renderer's splat draw into <paramref name="cmd"/>. Used by SRP hooks that
         /// own the render target (see <see cref="GsplatSorter.DeferDraws"/>); pipelines without
         /// such a hook submit from Update instead.
+        ///
+        /// Takes a raster command buffer rather than a plain one so the caller can record inside a
+        /// raster pass, which is what lets the graph merge the splat pass with the rest of the frame
+        /// and is a precondition for reading the target back as an input attachment.
         /// </summary>
-        public void RecordDraw(CommandBuffer cmd);
+        public void RecordDraw(RasterCommandBuffer cmd);
 
         // Used by GsplatSorter to populate the global packed buffer.
         public GsplatResource GsplatResource { get; }
@@ -264,7 +268,7 @@ namespace Gsplat
         /// Record the splat draws for the cameras gathered this frame. The caller owns the render
         /// target, so this must run after <see cref="DispatchSort"/> in the same command buffer.
         /// </summary>
-        public void RecordDraws(CommandBuffer cmd)
+        public void RecordDraws(RasterCommandBuffer cmd)
         {
             cmd.BeginSample(k_drawPassName);
             if (GlobalRenderEnabled)

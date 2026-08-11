@@ -89,7 +89,6 @@ namespace Gsplat
             class CompositePassData
             {
                 public TextureHandle Source;
-                public TextureHandle Target;
                 public Material Material;
             }
 
@@ -132,21 +131,25 @@ namespace Gsplat
                     k_offscreenTextureName, false, FilterMode.Bilinear, TextureWrapMode.Clamp);
 
                 using (var builder =
-                       renderGraph.AddUnsafePass<DrawPassData>(k_offscreenPassName, out var passData))
+                       renderGraph.AddRasterRenderPass<DrawPassData>(k_offscreenPassName, out var passData))
                 {
                     passData.Target = offscreen;
                     passData.TargetScreenParams = ScreenParams(desc.width, desc.height);
                     passData.CameraScreenParams = ScreenParams(cameraWidth, cameraHeight);
-                    builder.UseTexture(offscreen, AccessFlags.Write);
+                    // A raster pass rather than an unsafe one: binding the target as an attachment is
+                    // what lets the graph keep this work on tile and merge it with neighbouring
+                    // passes. An unsafe pass setting its own target is opaque to the graph, which has
+                    // to assume the worst and round-trip the attachments through memory.
+                    builder.SetRenderAttachment(offscreen, 0, AccessFlags.Write);
                     builder.UseTexture(resourceData.cameraDepthTexture, AccessFlags.Read);
                     // The draws are recorded through GsplatSorter, so the graph cannot see that
                     // this pass produces anything until the composite reads the target.
                     builder.AllowPassCulling(false);
                     builder.AllowGlobalStateModification(true);
-                    builder.SetRenderFunc(static (DrawPassData data, UnsafeGraphContext context) =>
+                    builder.SetRenderFunc(static (DrawPassData data, RasterGraphContext context) =>
                     {
-                        var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
-                        CoreUtils.SetRenderTarget(cmd, data.Target, ClearFlag.Color, Color.clear);
+                        var cmd = context.cmd;
+                        cmd.ClearRenderTarget(RTClearFlags.Color, Color.clear, 1f, 0);
                         cmd.SetGlobalInteger(k_gsplatOffscreen, 1);
                         // The splat shaders size themselves in target pixels: InitCorner derives the
                         // projected footprint and its below-2-pixel cull from _ScreenParams, and the
@@ -165,18 +168,15 @@ namespace Gsplat
                 }
 
                 using (var builder =
-                       renderGraph.AddUnsafePass<CompositePassData>(k_compositePassName, out var passData))
+                       renderGraph.AddRasterRenderPass<CompositePassData>(k_compositePassName, out var passData))
                 {
                     passData.Source = offscreen;
-                    passData.Target = resourceData.activeColorTexture;
                     passData.Material = CompositeMaterial;
                     builder.UseTexture(offscreen, AccessFlags.Read);
-                    builder.UseTexture(resourceData.activeColorTexture, AccessFlags.ReadWrite);
-                    builder.SetRenderFunc(static (CompositePassData data, UnsafeGraphContext context) =>
+                    builder.SetRenderAttachment(resourceData.activeColorTexture, 0, AccessFlags.ReadWrite);
+                    builder.SetRenderFunc(static (CompositePassData data, RasterGraphContext context) =>
                     {
-                        var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
-                        CoreUtils.SetRenderTarget(cmd, data.Target);
-                        Blitter.BlitTexture(cmd, data.Source, new Vector4(1, 1, 0, 0), data.Material, 0);
+                        Blitter.BlitTexture(context.cmd, data.Source, new Vector4(1, 1, 0, 0), data.Material, 0);
                     });
                 }
             }

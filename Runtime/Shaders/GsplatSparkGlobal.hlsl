@@ -64,6 +64,9 @@ bool InitGlobalSource(uint instanceId, float3 vertex, out GlobalSplatSource sour
     if (source.order >= _TotalSplatCount)
         return false;
 
+    // See Gsplat.shader: walked backwards so the under operator composites front-to-back.
+    source.order = _TotalSplatCount - 1u - source.order;
+
     uint packed     = _GlobalOrderBuffer[source.order];
     source.rendererId = packed >> 24u;
     source.id         = packed & 0x00FFFFFFu;
