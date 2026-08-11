@@ -48,9 +48,11 @@ Shader "Gsplat/Composite"
 
                 half4 acc = SAMPLE_TEXTURE2D_X_LOD(_BlitTexture, sampler_LinearClamp, input.texcoord, 0);
 
-                // Below one 8-bit step the result cannot change the destination, and dividing by
-                // an alpha that small would amplify accumulated noise into visible speckle.
-                if (acc.a < 1.0h / 255.0h)
+                // Only untouched pixels are dropped. There is no floor below this: rgb is
+                // premultiplied, so rgb <= a and the ratio stays bounded however small a gets —
+                // the quantisation that would justify a threshold does not exist in float16, and
+                // the camera target is not necessarily 8-bit either.
+                if (acc.a <= 0.0h)
                     discard;
 
                 half3 composited = acc.rgb / acc.a;

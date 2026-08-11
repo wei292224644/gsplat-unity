@@ -191,11 +191,10 @@ bool InitCorner(SplatSource source, SplatCovariance covariance, SplatCenter cent
     float l1 = 2.0 * min(sqrt(2.0 * lambda1), vmin);
     float l2 = 2.0 * min(sqrt(2.0 * lambda2), vmin);
 
-    // early-out gaussians smaller than 2 pixels
-    if (l1 < 2.0 && l2 < 2.0)
-    {
-        return false;
-    }
+    // Upstream dropped gaussians projecting below two pixels here. Removed: which splats exist is
+    // the asset's decision, not the renderer's. Keeping it would also have tied the drawn set to
+    // the offscreen target's resolution, so changing that knob would move both the fill and the
+    // splat count at once and no measured delta could be attributed to either.
 
     float2 c = center.proj.ww / _ScreenParams.xy;
 
