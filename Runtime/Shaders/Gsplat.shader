@@ -113,6 +113,9 @@ Shader "Gsplat/Standard"
 
             float4 frag(v2f i) : SV_Target
             {
+                UNITY_SETUP_STEREO_EYE_INDEX_POST_VERTEX(i);
+                if (GsplatOccluded(i.vertex)) discard;
+
                 float A = dot(i.uv, i.uv);
                 if (A > 1.0) discard;
 
@@ -123,9 +126,8 @@ Shader "Gsplat/Standard"
                 float alpha = (exp(-A * 4.0) + falloff) * i.color.a;
 
                 if (alpha < 1.0 / 255.0) discard;
-                if (_GammaToLinear)
-                    return float4(GammaToLinearSpace(i.color.rgb) * alpha * _Brightness, alpha);
-                return float4(i.color.rgb * alpha * _Brightness, alpha);
+                float3 rgb = GsplatToTargetSpace(i.color.rgb, _GammaToLinear);
+                return float4(rgb * alpha * _Brightness, alpha);
             }
             ENDHLSL
 

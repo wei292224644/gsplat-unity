@@ -19,6 +19,13 @@ namespace Gsplat
         public bool ComputeSortRequired { get; }
         public void ComputeDepth(CommandBuffer cmd, Matrix4x4 matrixMv);
 
+        /// <summary>
+        /// Record this renderer's splat draw into <paramref name="cmd"/>. Used by SRP hooks that
+        /// own the render target (see <see cref="GsplatSorter.DeferDraws"/>); pipelines without
+        /// such a hook submit from Update instead.
+        /// </summary>
+        public void RecordDraw(CommandBuffer cmd);
+
         // Used by GsplatSorter to populate the global packed buffer.
         public GsplatResource GsplatResource { get; }
         public uint SplatCount { get; }
@@ -73,6 +80,24 @@ namespace Gsplat
         public const string k_passName = "SortGsplats";
         const string k_depthPassName = "Gsplat.ComputeDepth";
         const string k_radixSortPassName = "Gsplat.RadixSort";
+        const string k_drawPassName = "Gsplat.Draw";
+
+        /// <summary>
+        /// True when splat draws are recorded by an SRP hook that owns the render target, instead
+        /// of being submitted immediately from <c>Update</c> via <c>Graphics.RenderMeshPrimitives</c>.
+        ///
+        /// This is a pure function of the active pipeline, deliberately: deriving it from "did the
+        /// render feature run last frame" would make the draw path depend on cross-frame ordering
+        /// between Update and the pipeline hook. Under URP the offscreen pass is not optional — the
+        /// gamma-domain composite lives there — so if the feature is missing from the renderer the
+        /// splats vanish loudly rather than being drawn twice into the wrong colour space.
+        /// </summary>
+        public static bool DeferDraws =>
+#if GSPLAT_ENABLE_URP
+            GraphicsSettings.currentRenderPipeline is UnityEngine.Rendering.Universal.UniversalRenderPipelineAsset;
+#else
+            false;
+#endif
 
         readonly GsplatGlobalRenderer m_globalRenderer = new();
 
@@ -233,6 +258,21 @@ namespace Gsplat
             // --- Global K-way merge ---
             if (GlobalRenderEnabled)
                 m_globalRenderer.DispatchMerge(cmd, m_activeGsplats);
+        }
+
+        /// <summary>
+        /// Record the splat draws for the cameras gathered this frame. The caller owns the render
+        /// target, so this must run after <see cref="DispatchSort"/> in the same command buffer.
+        /// </summary>
+        public void RecordDraws(CommandBuffer cmd)
+        {
+            cmd.BeginSample(k_drawPassName);
+            if (GlobalRenderEnabled)
+                m_globalRenderer.RecordDraw(cmd);
+            else
+                foreach (var gs in m_activeGsplats)
+                    gs.RecordDraw(cmd);
+            cmd.EndSample(k_drawPassName);
         }
 
         // Called by GsplatPlayerLoopHook once per frame, before Unity's PostLateUpdate phase

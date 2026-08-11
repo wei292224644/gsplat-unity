@@ -40,6 +40,48 @@ struct SplatCorner
 
 const float4 discardVec = float4(0.0, 0.0, 2.0, 1.0);
 
+// Set to 1 by the gsplat render pass while its own offscreen target is bound, which changes two
+// things about how a splat writes itself out: the colour domain, and who does the depth test.
+// Pipelines with no gsplat pass (BiRP, HDRP) leave this at 0 and keep the old behaviour exactly.
+int _GsplatOffscreen;
+
+UNITY_DECLARE_DEPTH_TEXTURE(_CameraDepthTexture);
+
+// The offscreen target is defined to be in gamma space, because 3DGS colours were fit against an
+// over-chain evaluated in gamma space: with C = sum(c_i * a_i * prod(1-a_j)), the correct result is
+// GammaToLinear(sum(c_i w_i)), not sum(GammaToLinear(c_i) w_i). GammaToLinear is non-linear, so the
+// two differ — and by Jensen (x^2.2 is convex) the per-splat form is biased bright, worst where
+// adjacent layers differ most. The conversion happens once, at the end of the chain, in the
+// composite pass; here a splat only has to enter the target's domain.
+// srcIsGamma mirrors the renderer's GammaToLinear flag: it says the stored colours are gamma-space.
+float3 GsplatToTargetSpace(float3 c, bool srcIsGamma)
+{
+    if (_GsplatOffscreen)
+        return srcIsGamma ? c : LinearToGammaSpace(c);
+    return srcIsGamma ? GammaToLinearSpace(c) : c;
+}
+
+// The offscreen target carries no depth attachment: it is allocated without MSAA (splats gain
+// nothing from it — their edges are alpha falloff, not coverage) and an attachment must match the
+// camera depth's sample count, so sharing it is not possible. Occlusion against opaque geometry is
+// therefore tested here instead of by the depth unit. Mirrors ZTest LEqual, which the compiler
+// turns into GEqual on reversed-Z platforms.
+// ponytail: uses _ScreenParams, which equals the offscreen size only while it is allocated at full
+// camera resolution. Dropping the target to a fraction of that must override _ScreenParams for the
+// pass — InitCorner's focal term reads it too, and wants the same override.
+bool GsplatOccluded(float4 svPosition)
+{
+    if (!_GsplatOffscreen)
+        return false;
+
+    float sceneDepth = SAMPLE_DEPTH_TEXTURE(_CameraDepthTexture, svPosition.xy / _ScreenParams.xy);
+    #if UNITY_REVERSED_Z
+    return svPosition.z < sceneDepth;
+    #else
+    return svPosition.z > sceneDepth;
+    #endif
+}
+
 bool InitCenter(float4x4 modelView, float3 modelCenter, out SplatCenter center)
 {
     float4 centerView = mul(modelView, float4(modelCenter, 1.0));

@@ -164,11 +164,27 @@ namespace Gsplat
                 m_renderer.EvaluateRefreshRequired(SortMode, SortRefreshRate - 1, CutoutsRefreshRate - 1);
                 m_renderer.DispatchInitOrder(Cutouts, transform.localToWorldMatrix, CutoutsUpdateBounds);
                 // When the global sorter has merged all renderers into a single draw call,
-                // skip the per-renderer draw — GsplatSorter.DrawAll handles rendering.
-                if (!GsplatSorter.Instance.GlobalRenderEnabled)
-                    m_renderer.Render(transform, gameObject.layer, GammaToLinear, SHDegree, Brightness,
-                        1.0f - SplatDownscaleFactor, RenderOrder);
+                // skip the per-renderer draw — GsplatGlobalRenderer handles rendering.
+                // Under a pipeline that owns the splat render target, the draw is recorded from
+                // RecordDraw during the pass instead of being submitted here.
+                if (!GsplatSorter.Instance.GlobalRenderEnabled && !GsplatSorter.DeferDraws)
+                {
+                    PrepareDraw();
+                    m_renderer.SubmitImmediate();
+                }
             }
+        }
+
+        void PrepareDraw() =>
+            m_renderer.PrepareDraw(transform, gameObject.layer, GammaToLinear, SHDegree, Brightness,
+                1.0f - SplatDownscaleFactor, RenderOrder);
+
+        public void RecordDraw(CommandBuffer cmd)
+        {
+            if (m_renderer == null || !Valid || !GsplatSettings.Instance.Valid || !GsplatSorter.Instance.Valid)
+                return;
+            PrepareDraw();
+            m_renderer.RecordDraw(cmd);
         }
     }
 }

@@ -158,7 +158,11 @@ namespace Gsplat
             if (m_totalSplatCount == 0) return;
             UpdateRendererTransforms(activeGsplats);
             UpdateRendererParams(activeGsplats);
-            Render();
+            // Pipelines that own the splat render target record the draw from RecordDraw during the
+            // pass, which also gets them a m_totalRemainingCount produced by this frame's merge
+            // rather than the previous frame's.
+            if (!GsplatSorter.DeferDraws && PrepareDraw())
+                SubmitImmediate();
         }
 
         public void DispatchMerge(CommandBuffer cmd, List<IGsplat> activeGsplats)
@@ -459,12 +463,18 @@ namespace Gsplat
         // -----------------------------------------------------------------------
         // Global draw call
         // -----------------------------------------------------------------------
-        void Render()
+        int m_drawInstanceCount;
+
+        /// <summary>
+        /// Fill the global property block for this frame's merged draw. Returns false when there is
+        /// nothing to draw.
+        /// </summary>
+        bool PrepareDraw()
         {
             // m_globalBuffersDirty: the active renderer set changed and the next DispatchSort
             // hasn't validated/rebuilt the buffers yet. Drawing now would bind stale buffers
-            // (under URP, DrawAllIfEnabled fires before DispatchSort each frame).
-            if (m_globalBuffersDirty || m_globalOrderBuffer == null || m_totalRemainingCount == 0) return;
+            // (under URP, Update fires before DispatchSort each frame).
+            if (m_globalBuffersDirty || m_globalOrderBuffer == null || m_totalRemainingCount == 0) return false;
 
             // Bind buffers via a MaterialPropertyBlock rather than on the material itself, so
             // each queued draw captures its own bindings and multiple cameras (Game + SceneView,
@@ -489,14 +499,33 @@ namespace Gsplat
             if (m_globalSHBands >= 4)
                 m_globalPropertyBlock.SetBuffer(k_globalSH4Buffer, m_globalSH4Buffer);
 
+            m_drawInstanceCount =
+                Mathf.CeilToInt(m_totalRemainingCount / (float)GsplatSettings.Instance.SplatInstanceSize);
+            return true;
+        }
+
+        void SubmitImmediate()
+        {
             var rp = new RenderParams(m_globalMaterial.Materials[m_globalSHBands])
             {
                 worldBounds = new Bounds(Vector3.zero, Vector3.one * 1e6f),
                 matProps = m_globalPropertyBlock
             };
 
-            int instances = Mathf.CeilToInt(m_totalRemainingCount / (float)GsplatSettings.Instance.SplatInstanceSize);
-            Graphics.RenderMeshPrimitives(rp, GsplatSettings.Instance.Mesh, 0, instances);
+            Graphics.RenderMeshPrimitives(rp, GsplatSettings.Instance.Mesh, 0, m_drawInstanceCount);
+        }
+
+        /// <summary>
+        /// Record the merged draw into a command buffer whose render target the caller owns.
+        /// Prepares here rather than in Update so the instance count comes from this frame's merge.
+        /// </summary>
+        public void RecordDraw(CommandBuffer cmd)
+        {
+            if (!PrepareDraw())
+                return;
+
+            cmd.DrawMeshInstancedProcedural(GsplatSettings.Instance.Mesh, 0,
+                m_globalMaterial.Materials[m_globalSHBands], 0, m_drawInstanceCount, m_globalPropertyBlock);
         }
 
 

@@ -250,19 +250,28 @@ namespace Gsplat
                 m_framesBeforeRecomputeSort -= 1;
         }
 
+        // Draw state produced by PrepareDraw and consumed by RecordDraw / SubmitImmediate.
+        Material m_drawMaterial;
+        Bounds m_drawBounds;
+        int m_drawLayer;
+        int m_drawInstanceCount;
+        bool m_drawReady;
+
         /// <summary>
-        /// Render the splats.
+        /// Fill the property block and resolve the material/instance count for this frame's draw.
+        /// Does not submit anything — call <see cref="SubmitImmediate"/> or <see cref="RecordDraw"/>.
         /// </summary>
         /// <param name="transform">Object transform.</param>
         /// <param name="layer">Layer used for rendering.</param>
-        /// <param name="gammaToLinear">Covert color space from Gamma to Linear.</param>
+        /// <param name="gammaToLinear">The splat colors are stored in gamma space.</param>
         /// <param name="shDegree">Order of SH coefficients used for rendering. The final value is capped by the SHBands property.</param>
         /// <param name="brightness">Brightness color scaling.</param>
         /// <param name="scaleFactor">Splats uv scaling factor, reduce splat size while trying to keep visual fidelity.</param>
         /// <param name="renderOrder">Manual render order placement of the gsplat. The final value is capped by the maximum render order setting.</param>
-        public void Render(Transform transform, int layer, bool gammaToLinear = false, int shDegree = 3,
+        public void PrepareDraw(Transform transform, int layer, bool gammaToLinear = false, int shDegree = 3,
             float brightness = 1.0f, float scaleFactor = 1.0f, uint renderOrder = 0)
         {
+            m_drawReady = false;
             if (m_remainingCount <= 0)
                 return;
 
@@ -275,15 +284,43 @@ namespace Gsplat
             m_propertyBlock.SetMatrix(k_matrixM, transform.localToWorldMatrix);
 
             uint order = Math.Clamp(renderOrder, 0, GsplatSettings.Instance.MaxRenderOrder - 1);
-            var rp = new RenderParams(m_gsplatAsset.Materials[order])
+            m_drawMaterial = m_gsplatAsset.Materials[order];
+            m_drawBounds = GsplatUtils.CalcWorldBounds(m_bounds, transform);
+            m_drawLayer = layer;
+            m_drawInstanceCount =
+                Mathf.CeilToInt(m_remainingCount / (float)GsplatSettings.Instance.SplatInstanceSize);
+            m_drawReady = true;
+        }
+
+        /// <summary>
+        /// Submit the prepared draw through the immediate renderer, letting the pipeline place it in
+        /// its own transparent queue. Used by pipelines with no gsplat render pass (BiRP, HDRP).
+        /// </summary>
+        public void SubmitImmediate()
+        {
+            if (!m_drawReady)
+                return;
+
+            var rp = new RenderParams(m_drawMaterial)
             {
-                worldBounds = GsplatUtils.CalcWorldBounds(m_bounds, transform),
+                worldBounds = m_drawBounds,
                 matProps = m_propertyBlock,
-                layer = layer
+                layer = m_drawLayer
             };
 
-            Graphics.RenderMeshPrimitives(rp, GsplatSettings.Instance.Mesh, 0,
-                Mathf.CeilToInt(m_remainingCount / (float)GsplatSettings.Instance.SplatInstanceSize));
+            Graphics.RenderMeshPrimitives(rp, GsplatSettings.Instance.Mesh, 0, m_drawInstanceCount);
+        }
+
+        /// <summary>
+        /// Record the prepared draw into a command buffer whose render target the caller owns.
+        /// </summary>
+        public void RecordDraw(CommandBuffer cmd)
+        {
+            if (!m_drawReady)
+                return;
+
+            cmd.DrawMeshInstancedProcedural(GsplatSettings.Instance.Mesh, 0, m_drawMaterial, 0,
+                m_drawInstanceCount, m_propertyBlock);
         }
     }
 }

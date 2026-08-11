@@ -39,6 +39,16 @@ namespace Gsplat
                 }
                 else
                 {
+                    // Checked outside the version ladder below: those branches are chained with
+                    // else-if, so an asset upgrading from an early version takes one branch, stamps
+                    // the current version, and never picks up fields added by the later ones.
+                    if (!settings.CompositeShader)
+                    {
+                        settings.CompositeShader = DefaultCompositeShader;
+                        EditorUtility.SetDirty(settings);
+                        AssetDatabase.SaveAssets();
+                    }
+
                     if (settings.Version < new Version("1.2.0"))
                     {
                         Debug.Log($"Updated GsplatSettings from version {settings.Version}.");
@@ -69,6 +79,9 @@ namespace Gsplat
 
         public ComputeShader ComputeShader;
         public GsplatGlobalMaterial GlobalMaterial;
+
+        [Tooltip("Resolves the offscreen gsplat target into the camera target. Required under URP.")]
+        public Shader CompositeShader;
 
         [Tooltip(
             "When enabled, 2+ active Gaussian splat renderers are merged into a single globally depth-sorted draw call.")]
@@ -113,6 +126,9 @@ namespace Gsplat
         static GsplatGlobalMaterial DefaultGlobalMaterial => AssetDatabase.LoadAssetAtPath<GsplatGlobalMaterial>(
             GsplatUtils.k_PackagePath + "Runtime/Materials/GsplatGlobal.asset");
 
+        static Shader DefaultCompositeShader => AssetDatabase.LoadAssetAtPath<Shader>(
+            GsplatUtils.k_PackagePath + "Runtime/Shaders/GsplatComposite.shader");
+
         static GsplatMaterial[] DefaultMaterials
         {
             get
@@ -133,6 +149,7 @@ namespace Gsplat
             Version = GsplatUtils.k_Version;
             ComputeShader = DefaultComputeShader;
             GlobalMaterial = DefaultGlobalMaterial;
+            CompositeShader = DefaultCompositeShader;
             Materials = DefaultMaterials;
             SplatInstanceSize = 128;
             UploadBatchSize = 100000;

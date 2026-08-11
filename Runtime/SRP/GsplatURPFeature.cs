@@ -1,4 +1,4 @@
-﻿// Originated from the GaussianSplatHDRPPass in aras-p/UnityGaussianSplatting by Aras Pranckevičius
+// Originated from the GaussianSplatHDRPPass in aras-p/UnityGaussianSplatting by Aras Pranckevičius
 // https://github.com/aras-p/UnityGaussianSplatting/blob/main/package/Runtime/GaussianSplatHDRPPass.cs
 // Copyright (c) 2023 Aras Pranckevičius
 // Modified by Yize Wu
@@ -7,6 +7,8 @@
 
 #if GSPLAT_ENABLE_URP
 
+using UnityEngine;
+using UnityEngine.Experimental.Rendering;
 using UnityEngine.Rendering;
 using UnityEngine.Rendering.Universal;
 #if UNITY_6000_0_OR_NEWER
@@ -46,12 +48,125 @@ namespace Gsplat
 #endif
         }
 
+#if UNITY_6000_0_OR_NEWER
+        /// <summary>
+        /// Draws the splats into a target of their own and resolves it into the camera colour.
+        ///
+        /// The splats cannot blend straight into the camera target: the over-chain has to complete
+        /// in gamma space (see GsplatToTargetSpace in Gsplat.hlsl), and a shared linear target gives
+        /// nowhere to put the single conversion that belongs at the end of the chain.
+        /// </summary>
+        class GsplatDrawPass : ScriptableRenderPass
+        {
+            // Float16 rather than the camera's 8-bit format: the composite divides out the
+            // premultiplied alpha, scaling quantisation error by 1/alpha. At 8 bits a one-step
+            // alpha would amplify a one-step colour error to full scale, speckling every faint
+            // splat edge. Bandwidth for this is what dropping the target below camera resolution
+            // is meant to buy back.
+            const GraphicsFormat k_offscreenFormat = GraphicsFormat.R16G16B16A16_SFloat;
+
+            const string k_offscreenPassName = "Gsplat.Offscreen";
+            const string k_compositePassName = "Gsplat.Composite";
+            const string k_offscreenTextureName = "_GsplatOffscreen";
+
+            static readonly int k_gsplatOffscreen = Shader.PropertyToID("_GsplatOffscreen");
+
+            public Material CompositeMaterial;
+
+            class DrawPassData
+            {
+                public TextureHandle Target;
+            }
+
+            class CompositePassData
+            {
+                public TextureHandle Source;
+                public TextureHandle Target;
+                public Material Material;
+            }
+
+            public GsplatDrawPass()
+            {
+                // The offscreen target is allocated without MSAA, so it cannot take the camera's
+                // depth as an attachment; the splat shaders test occlusion against the depth
+                // texture instead. Asking for it here makes URP produce one for this frame
+                // regardless of the pipeline asset's own depth-texture setting.
+                ConfigureInput(ScriptableRenderPassInput.Depth);
+            }
+
+            public override void RecordRenderGraph(RenderGraph renderGraph, ContextContainer frameData)
+            {
+                if (!CompositeMaterial)
+                    return;
+
+                var resourceData = frameData.Get<UniversalResourceData>();
+                var cameraData = frameData.Get<UniversalCameraData>();
+
+                var desc = cameraData.cameraTargetDescriptor;
+                desc.graphicsFormat = k_offscreenFormat;
+                desc.depthBufferBits = 0;
+                desc.msaaSamples = 1;
+                desc.useMipMap = false;
+                desc.autoGenerateMips = false;
+                desc.bindMS = false;
+
+                var offscreen = UniversalRenderer.CreateRenderGraphTexture(renderGraph, desc,
+                    k_offscreenTextureName, false, FilterMode.Bilinear, TextureWrapMode.Clamp);
+
+                using (var builder =
+                       renderGraph.AddUnsafePass<DrawPassData>(k_offscreenPassName, out var passData))
+                {
+                    passData.Target = offscreen;
+                    builder.UseTexture(offscreen, AccessFlags.Write);
+                    builder.UseTexture(resourceData.cameraDepthTexture, AccessFlags.Read);
+                    // The draws are recorded through GsplatSorter, so the graph cannot see that
+                    // this pass produces anything until the composite reads the target.
+                    builder.AllowPassCulling(false);
+                    builder.AllowGlobalStateModification(true);
+                    builder.SetRenderFunc(static (DrawPassData data, UnsafeGraphContext context) =>
+                    {
+                        var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+                        CoreUtils.SetRenderTarget(cmd, data.Target, ClearFlag.Color, Color.clear);
+                        cmd.SetGlobalInteger(k_gsplatOffscreen, 1);
+                        GsplatSorter.Instance.RecordDraws(cmd);
+                        // Restore, so anything else drawing these materials this frame (BiRP-style
+                        // immediate submissions, editor preview cameras) keeps the old behaviour.
+                        cmd.SetGlobalInteger(k_gsplatOffscreen, 0);
+                    });
+                }
+
+                using (var builder =
+                       renderGraph.AddUnsafePass<CompositePassData>(k_compositePassName, out var passData))
+                {
+                    passData.Source = offscreen;
+                    passData.Target = resourceData.activeColorTexture;
+                    passData.Material = CompositeMaterial;
+                    builder.UseTexture(offscreen, AccessFlags.Read);
+                    builder.UseTexture(resourceData.activeColorTexture, AccessFlags.ReadWrite);
+                    builder.SetRenderFunc(static (CompositePassData data, UnsafeGraphContext context) =>
+                    {
+                        var cmd = CommandBufferHelpers.GetNativeCommandBuffer(context.cmd);
+                        CoreUtils.SetRenderTarget(cmd, data.Target);
+                        Blitter.BlitTexture(cmd, data.Source, new Vector4(1, 1, 0, 0), data.Material, 0);
+                    });
+                }
+            }
+        }
+#endif
+
         GsplatRenderPass m_pass;
+#if UNITY_6000_0_OR_NEWER
+        GsplatDrawPass m_drawPass;
+        Material m_compositeMaterial;
+#endif
         bool m_hasGsplats;
 
         public override void Create()
         {
             m_pass = new GsplatRenderPass { renderPassEvent = RenderPassEvent.BeforeRenderingTransparents };
+#if UNITY_6000_0_OR_NEWER
+            m_drawPass = new GsplatDrawPass { renderPassEvent = RenderPassEvent.BeforeRenderingTransparents };
+#endif
         }
 
         public override void OnCameraPreCull(ScriptableRenderer renderer, in CameraData cameraData)
@@ -65,8 +180,28 @@ namespace Gsplat
 
         public override void AddRenderPasses(ScriptableRenderer renderer, ref RenderingData renderingData)
         {
-            if (GsplatSorter.Instance.Valid && GsplatSettings.Instance.Valid && m_hasGsplats)
-                renderer.EnqueuePass(m_pass);
+            if (!GsplatSorter.Instance.Valid || !GsplatSettings.Instance.Valid || !m_hasGsplats)
+                return;
+
+            renderer.EnqueuePass(m_pass);
+#if UNITY_6000_0_OR_NEWER
+            var shader = GsplatSettings.Instance.CompositeShader;
+            if (!shader)
+            {
+                Debug.LogError(
+                    "[GsplatURPFeature] GsplatSettings.CompositeShader is unset — assign Runtime/Shaders/GsplatComposite.shader. Splats will not be drawn.");
+                return;
+            }
+
+            if (!m_compositeMaterial || m_compositeMaterial.shader != shader)
+            {
+                CoreUtils.Destroy(m_compositeMaterial);
+                m_compositeMaterial = CoreUtils.CreateEngineMaterial(shader);
+            }
+
+            m_drawPass.CompositeMaterial = m_compositeMaterial;
+            renderer.EnqueuePass(m_drawPass);
+#endif
         }
 
         protected override void Dispose(bool disposing)
@@ -74,6 +209,11 @@ namespace Gsplat
 #if !UNITY_6000_0_OR_NEWER
             m_pass.CommandBuffer?.Dispose();
             m_pass.CommandBuffer = null;
+#endif
+#if UNITY_6000_0_OR_NEWER
+            CoreUtils.Destroy(m_compositeMaterial);
+            m_compositeMaterial = null;
+            m_drawPass = null;
 #endif
             m_pass = null;
         }
