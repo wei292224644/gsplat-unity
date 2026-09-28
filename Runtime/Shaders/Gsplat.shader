@@ -27,7 +27,7 @@ Shader "Gsplat/Standard"
             #pragma fragment frag
             #pragma require compute
             #pragma multi_compile SH_BANDS_0 SH_BANDS_1 SH_BANDS_2 SH_BANDS_3 SH_BANDS_4
-            #pragma multi_compile UNCOMPRESSED SPARK
+            #pragma multi_compile UNCOMPRESSED SPARK LOD
 
             #include "UnityCG.cginc"
             #include "Gsplat.hlsl"
@@ -36,6 +36,9 @@ Shader "Gsplat/Standard"
             #endif
             #ifdef SPARK
             #include "GsplatSpark.hlsl"
+            #endif
+            #ifdef LOD
+            #include "GsplatLod.hlsl"
             #endif
 
 
@@ -134,7 +137,23 @@ Shader "Gsplat/Standard"
                 float maxUV = max(absUV.x, absUV.y);
 
                 float falloff = -exp((maxUV - _ScaleFactor * 1.16) * 25 * _ScaleFactor);
-                float alpha = (exp(-A * 4.0) + falloff) * i.color.a;
+                float alpha;
+                #ifdef LOD
+                if (i.color.a > 1.0)
+                {
+                    // Merged LoD node (spec D15): colour.a carries D. The quad was widened by k in
+                    // GsplatLod.hlsl, so uv = 1 sits at √8·k of the node's σ; z² is in those σ units.
+                    // Spark's profile: 1 − (1 − e^{−z²/2})^{exp((D²−1)/e)}.
+                    float k = LodExtentScale(i.color.a);
+                    float z2 = 8.0 * k * k * A;
+                    float power = exp((i.color.a * i.color.a - 1.0) / 2.718281828459045);
+                    alpha = 1.0 - pow(max(1.0 - exp(-0.5 * z2), 0.0), power) + falloff;
+                }
+                else
+                #endif
+                {
+                    alpha = (exp(-A * 4.0) + falloff) * i.color.a;
+                }
 
                 if (alpha < 1.0 / 255.0) discard;
                 float3 rgb = GsplatToTargetSpace(i.color.rgb, _GammaToLinear);

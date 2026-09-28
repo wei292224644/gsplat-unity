@@ -1,0 +1,23 @@
+// Copyright (c) 2026 wwj
+// SPDX-License-Identifier: MIT
+
+#define GROUP_SIZE 1024
+
+#pragma kernel CalcDepthLod
+
+// Depth of the selected cut only: _SplatCount is the cut size, _OrderBuffer holds node indices.
+uint _SplatCount;
+float4x4 _MatrixMV;
+StructuredBuffer<uint4> _LodNodesBuffer;
+StructuredBuffer<uint> _OrderBuffer;
+RWStructuredBuffer<float> _DepthBuffer;
+
+[numthreads(GROUP_SIZE, 1, 1)]
+void CalcDepthLod(uint3 id : SV_DispatchThreadID)
+{
+    uint idx = id.x;
+    if (idx >= _SplatCount)
+        return;
+    float3 pos = asfloat(_LodNodesBuffer[_OrderBuffer[idx] * 2].xyz);
+    _DepthBuffer[idx] = mul(_MatrixMV, float4(pos, 1)).z;
+}

@@ -1,0 +1,40 @@
+// Copyright (c) 2026 wwj
+// SPDX-License-Identifier: MIT
+
+// Test-only probe: decodes .gsd nodes on the GPU through the runtime's own includes, so
+// GsdDecodeTests can compare the result with the Rust decoder's output in the fixture JSON.
+#pragma kernel Decode
+
+#define SH_BANDS_3
+#define SH_COEFFS 15
+#include "Packages/wu.yize.gsplat/Runtime/Shaders/GsplatLodDecode.hlsl"
+#include "Packages/wu.yize.gsplat/Runtime/Shaders/GsplatSparkSH.hlsl"
+
+StructuredBuffer<uint4> _LodNodesBuffer;
+RWStructuredBuffer<float> _Out;
+uint _Count;
+
+// center 3 · alpha 1 · rgb 3 · scale 3 · quat 4 · shader-order quat 4 · sh 45
+#define STRIDE 63
+
+void Put3(uint at, float3 v) { _Out[at] = v.x; _Out[at + 1] = v.y; _Out[at + 2] = v.z; }
+void Put4(uint at, float4 v) { Put3(at, v.xyz); _Out[at + 3] = v.w; }
+
+[numthreads(64, 1, 1)]
+void Decode(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Count)
+        return;
+    LodSplat s = UnpackLodSplat(_LodNodesBuffer[id.x * 2], _LodNodesBuffer[id.x * 2 + 1]);
+    uint o = id.x * STRIDE;
+    Put3(o, s.center);
+    _Out[o + 3] = s.alpha;
+    Put3(o + 4, s.rgb);
+    Put3(o + 7, s.scale);
+    Put4(o + 10, s.quat);
+    Put4(o + 14, LodQuatToShaderOrder(s.quat));
+    float3 sh[SH_COEFFS];
+    InitSH(id.x, sh);
+    for (uint k = 0; k < SH_COEFFS; ++k)
+        Put3(o + 18 + k * 3, sh[k]);
+}
