@@ -59,4 +59,15 @@ float LodExtentScale(float alphaOrD)
     return alphaOrD > 1.0 ? (sqrt(8.0) + 0.7 * (alphaOrD - 1.0)) / sqrt(8.0) : 1.0;
 }
 
+// Opacity of a merged node (D > 1) at A = |uv|², where uv = 1 is the rim of its quad widened by
+// LodExtentScale (spec D15). Spark's profile 1 − (1 − e^{−z²/2})^{exp((D²−1)/e)}, with z measured
+// in the node's own σ: z² = 8k²A. At D = 1 it is the plain Gaussian e^{−4A}.
+float LodMergedAlpha(float D, float A)
+{
+    float k = LodExtentScale(D);
+    float z2 = 8.0 * k * k * A;
+    float power = exp((D * D - 1.0) / 2.718281828459045);
+    return 1.0 - pow(max(1.0 - exp(-0.5 * z2), 0.0), power);
+}
+
 #endif

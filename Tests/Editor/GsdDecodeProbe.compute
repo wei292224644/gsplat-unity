@@ -4,6 +4,7 @@
 // Test-only probe: decodes .gsd nodes on the GPU through the runtime's own includes, so
 // GsdDecodeTests can compare the result with the Rust decoder's output in the fixture JSON.
 #pragma kernel Decode
+#pragma kernel MergedAlpha
 
 #define SH_BANDS_3
 #define SH_COEFFS 15
@@ -37,4 +38,15 @@ void Decode(uint3 id : SV_DispatchThreadID)
     InitSH(id.x, sh);
     for (uint k = 0; k < SH_COEFFS; ++k)
         Put3(o + 18 + k * 3, sh[k]);
+}
+
+// (D, A = |uv|²) → the merged-node opacity the fragment shader draws (before its edge falloff).
+StructuredBuffer<float2> _AlphaIn;
+
+[numthreads(64, 1, 1)]
+void MergedAlpha(uint3 id : SV_DispatchThreadID)
+{
+    if (id.x >= _Count)
+        return;
+    _Out[id.x] = LodMergedAlpha(_AlphaIn[id.x].x, _AlphaIn[id.x].y);
 }

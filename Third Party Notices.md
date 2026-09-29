@@ -36,8 +36,14 @@ CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 ## Spark
 
 `Tools~/gsd-build` depends on Spark's `spark-lib` crate for splat decoding and LoD tree
-construction. The ExtSplat node layout, its quaternion codec (`Runtime/Shaders/GsplatLodDecode.hlsl`)
-and the LoD traversal (`Runtime/Lod/GsplatLodTraversal.cs`) are ported from Spark.
+construction. Ported from Spark:
+
+- the ExtSplat node layout and its quaternion codec (`Runtime/Shaders/GsplatLodDecode.hlsl`);
+- the merged-node (D > 1) opacity falloff `1 − (1 − e^{−z²/2})^{exp((D²−1)/e)}`
+  (`LodMergedAlpha` in `Runtime/Shaders/GsplatLodDecode.hlsl`, used by `Runtime/Shaders/Gsplat.shader`);
+- the merged-node extent widening by `0.7·(D − 1)` σ (`LodExtentScale`, same file, applied in
+  `Runtime/Shaders/GsplatLod.hlsl`);
+- the LoD traversal (`Runtime/Lod/GsplatLodTraversal.cs`).
 
 - Project: https://github.com/sparkjsdev/spark
 - Revision: 967263804e637776e94395e61ab2f6cb6a04663c

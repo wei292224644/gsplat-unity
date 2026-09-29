@@ -142,12 +142,8 @@ Shader "Gsplat/Standard"
                 if (i.color.a > 1.0)
                 {
                     // Merged LoD node (spec D15): colour.a carries D. The quad was widened by k in
-                    // GsplatLod.hlsl, so uv = 1 sits at √8·k of the node's σ; z² is in those σ units.
-                    // Spark's profile: 1 − (1 − e^{−z²/2})^{exp((D²−1)/e)}.
-                    float k = LodExtentScale(i.color.a);
-                    float z2 = 8.0 * k * k * A;
-                    float power = exp((i.color.a * i.color.a - 1.0) / 2.718281828459045);
-                    alpha = 1.0 - pow(max(1.0 - exp(-0.5 * z2), 0.0), power) + falloff;
+                    // GsplatLod.hlsl, so uv = 1 sits at √8·k of the node's σ.
+                    alpha = LodMergedAlpha(i.color.a, A) + falloff;
                 }
                 else
                 #endif
