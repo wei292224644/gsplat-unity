@@ -187,6 +187,14 @@ namespace Gsplat
             GsplatResource = null;
             m_gsplatAsset = null;
             m_gsplatAssetID = 0;
+            // The LoD path only writes m_remainingCount/Initialized when a cut is published, unlike
+            // DispatchInitOrder which rewrote both every frame; without this, a rebind that never
+            // publishes a cut (D12-refused, or no Camera.main) keeps the previous binding's values —
+            // stale RemainingCount over a differently-sized buffer, or a stale Initialized=true that
+            // skips the next non-LoD asset's identity fill.
+            m_remainingCount = 0;
+            if (SorterResource != null)
+                SorterResource.Initialized = false;
         }
 
         void CreateResources(uint splatCount)

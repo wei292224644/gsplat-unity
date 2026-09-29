@@ -30,7 +30,18 @@ namespace Gsplat
         public GsplatLodDriver(GsplatLodAsset asset, int budget)
         {
             m_tree = new GsplatLodTree(asset.Nodes, asset.ChildStart, asset.ChildCount);
-            m_selector = new GsplatLodSelector(m_tree, budget);
+            try
+            {
+                m_selector = new GsplatLodSelector(m_tree, budget);
+            }
+            catch
+            {
+                // The tree's NativeArrays are Allocator.Persistent; without this they'd leak if the
+                // selector (e.g. an invalid budget) throws after the tree is already built.
+                m_tree.Dispose();
+                throw;
+            }
+
             ++LiveCount;
         }
 
@@ -85,9 +96,18 @@ namespace Gsplat
             if (m_disposed)
                 return;
             m_disposed = true;
-            m_selector.Dispose();
-            m_tree.Dispose();
-            --LiveCount;
+            // If m_selector.Dispose() throws (a job exception surfaced by Complete), the tree must
+            // still be freed and LiveCount must still drop exactly once — otherwise every later LoD
+            // binding is refused by D12 until a domain reload.
+            try
+            {
+                m_selector.Dispose();
+            }
+            finally
+            {
+                m_tree.Dispose();
+                --LiveCount;
+            }
         }
     }
 }

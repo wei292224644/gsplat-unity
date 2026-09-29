@@ -81,6 +81,28 @@ namespace Gsplat.Tests
             return renderer;
         }
 
+        // Minimal in-memory non-LoD asset, built the same way RuntimePlyBytesLoaderTest builds one
+        // from PLY bytes (Allocate then fill the arrays) — there is no existing small non-LoD asset
+        // fixture in this test assembly, and importing a real .ply/.spz just for this would be far
+        // more setup than the scenario needs.
+        static GsplatAssetUncompressed CreateNonLodAsset(uint splatCount)
+        {
+            var asset = ScriptableObject.CreateInstance<GsplatAssetUncompressed>();
+            asset.SplatCount = splatCount;
+            asset.SHBands = 0;
+            asset.Allocate();
+            for (uint i = 0; i < splatCount; i++)
+            {
+                asset.Positions[i] = Vector3.zero;
+                asset.Colors[i] = new Vector4(1f, 1f, 1f, 1f);
+                asset.Scales[i] = Vector3.one * 0.01f;
+                asset.Rotations[i] = new Vector4(0f, 0f, 0f, 1f);
+            }
+
+            asset.Bounds = new Bounds(Vector3.zero, Vector3.one);
+            return asset;
+        }
+
         [Test]
         public void PublishesACutWithinTheBudgetAndFlagsASort()
         {
@@ -90,6 +112,72 @@ namespace Gsplat.Tests
             Assert.That(renderer.RemainingCount, Is.InRange(1u, 4u));
             Assert.IsTrue(renderer.ComputeSortRequired, "a fresh cut must be sorted the frame it lands (D11)");
             Assert.IsTrue(renderer.SorterResource.Initialized, "the cut is the payload; the sort must not identity-fill it (D14)");
+        }
+
+        [Test]
+        public void SwitchingToLodWhileAnotherRendererIsLiveResetsStaleState()
+        {
+            var first = CreateRenderer("first");
+            first.Update();
+            Assert.AreEqual(1, GsplatLodDriver.LiveCount);
+
+            // budget is 4 (SetUp); more splats than that so a leftover RemainingCount would be
+            // visibly wrong against the LoD asset's budget-sized order buffer.
+            var nonLodAsset = CreateNonLodAsset(6);
+            try
+            {
+                var second = Create("second").AddComponent<GsplatRenderer>();
+                second.GsplatAsset = nonLodAsset;
+                second.Update();
+                Assert.Greater(second.RemainingCount, 0u,
+                    "the non-LoD asset must render normally before the switch");
+
+                second.GsplatAsset = m_asset;
+                LogAssert.Expect(LogType.Error, new Regex("at most one active LoD renderer"));
+                second.Update();
+
+                Assert.AreEqual(0u, second.RemainingCount,
+                    "a D12-refused rebind must not keep drawing the previous binding's splat count " +
+                    "over a budget-sized buffer");
+            }
+            finally
+            {
+                Object.DestroyImmediate(nonLodAsset);
+            }
+        }
+
+        [Test]
+        public void AFreshCutForcesASortEvenWhenTheScheduleWouldSkipIt()
+        {
+            var renderer = CreateRenderer("lod");
+            renderer.SortMode = GsplatRenderer.GsplatSortMode.SortEveryNFrames;
+            renderer.SortRefreshRate = 1000;
+            renderer.Update(); // primes the driver; the camera is newly seen so this frame always sorts
+
+            renderer.ReloadAsset(); // forces a rebind, which primes a brand-new cut next frame
+            renderer.Update();
+
+            Assert.IsTrue(renderer.ComputeSortRequired,
+                "a fresh cut lands unsorted; it must be sorted the frame it publishes regardless of " +
+                "the sort-refresh schedule (D11)");
+        }
+
+        [Test]
+        public void ClearingTheAssetReleasesTheDriverSoAnotherCanBind()
+        {
+            var a = CreateRenderer("a");
+            a.Update();
+            Assert.AreEqual(1, GsplatLodDriver.LiveCount);
+
+            a.GsplatAsset = null;
+            a.Update();
+            Assert.AreEqual(0, GsplatLodDriver.LiveCount,
+                "clearing the asset must release the driver, or D12 starves every later LoD renderer");
+
+            var b = CreateRenderer("b");
+            b.Update(); // must not log the D12 error — LogAssert fails the test on any unexpected error
+            Assert.IsTrue(b.IsLod);
+            Assert.Greater(b.RemainingCount, 0u);
         }
 
         [Test]

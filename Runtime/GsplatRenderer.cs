@@ -42,6 +42,12 @@ namespace Gsplat
         bool m_warnedLodCutouts;
         bool m_warnedNoCamera;
 
+        // Plain bool, not a UnityEngine.Object reference: a destroyed asset reads as falsy through
+        // ANY reference to it, so comparing m_prevAsset to GsplatAsset cannot tell "the bound asset
+        // was cleared/destroyed" from "nothing was ever bound" once either side goes fake-null. This
+        // flag is what actually decides whether a release is owed.
+        bool m_boundToAsset;
+
         // LoD assets draw at most the budget, so their order buffer is sized to it (spec §7).
         uint OrderCapacity => GsplatAsset is GsplatLodAsset
             ? GsplatSettings.Instance.LodSplatBudget
@@ -115,6 +121,7 @@ namespace Gsplat
             GsplatSorter.Instance.UnregisterGsplat(this);
             m_renderer?.Dispose();
             m_renderer = null;
+            m_boundToAsset = false;
         }
 
         public void ForceRefresh()
@@ -155,16 +162,30 @@ namespace Gsplat
         public void Update()
         {
             if (!GsplatAsset)
-                m_prevAsset = null;
-            // ponytail: a budget change rebinds and re-uploads the asset; only the bench changes it at runtime.
-            if (GsplatAsset && m_renderer != null && m_prevAsset == GsplatAsset && m_renderer.SplatCount != OrderCapacity)
-                m_prevAsset = null;
-            if (m_prevAsset != GsplatAsset)
             {
-                m_renderer?.ReleaseGsplatAsset();
-                m_prevAsset = GsplatAsset;
-                if (GsplatAsset)
+                // GsplatAsset was cleared or destroyed. Release directly on m_boundToAsset, not on
+                // "m_prevAsset != GsplatAsset": a destroyed reference compares equal to null (and to
+                // any other destroyed/null reference) through Unity's operator overloads, so that
+                // comparison cannot detect this case once GsplatAsset itself has gone fake-null.
+                if (m_boundToAsset)
                 {
+                    m_renderer?.ReleaseGsplatAsset();
+                    m_boundToAsset = false;
+                }
+
+                m_prevAsset = null;
+            }
+            else
+            {
+                // ponytail: a budget change rebinds and re-uploads the asset; only the bench changes it at runtime.
+                if (m_renderer != null && m_prevAsset == GsplatAsset && m_renderer.SplatCount != OrderCapacity)
+                    m_prevAsset = null;
+
+                if (m_prevAsset != GsplatAsset)
+                {
+                    if (m_boundToAsset)
+                        m_renderer?.ReleaseGsplatAsset();
+                    m_prevAsset = GsplatAsset;
                     if (m_renderer == null)
                         m_renderer = new GsplatRendererImpl(OrderCapacity);
                     else
@@ -175,6 +196,7 @@ namespace Gsplat
                     var asyncUpload = AsyncUpload;
 #endif
                     m_renderer.BindGsplatAsset(GsplatAsset, asyncUpload);
+                    m_boundToAsset = true;
                     GsplatSorter.Instance.MarkGlobalBuffersDirty();
                 }
             }
