@@ -190,7 +190,7 @@ namespace Gsplat
                 var id = obj ? GsplatUtils.GetObjectId(obj) : 0;
                 if (m_warnedUncompressed.Add(id))
                     Debug.LogWarning(
-                        $"[GsplatSorter] '{obj?.name}' uses an uncompressed asset; global sort requires every active renderer to use SPARK compression. Disabling global sort for this scene — all renderers fall back to per-renderer rendering.");
+                        $"[GsplatSorter] '{obj?.name}' uses {gs.GsplatResource?.GetType().Name ?? "no resource"}; global sort requires every active renderer to use SPARK compression. Disabling global sort for this scene — all renderers fall back to per-renderer rendering.");
                 return false;
             }
 
@@ -243,6 +243,14 @@ namespace Gsplat
 
                 if (!res.Initialized)
                 {
+                    if (gs.GsplatResource is GsplatResourceLod)
+                    {
+                        // D14: the LoD selection owns this buffer. Identity-filling it would draw nodes
+                        // 0..count-1 of the tree — interiors and leaves mixed — instead of the cut.
+                        Debug.LogError("[GsplatSorter] a LoD order buffer reached the sort before its first cut; skipping it.");
+                        continue;
+                    }
+
                     m_sortPass.InitPayload(cmd, res.OrderBuffer, (uint)res.OrderBuffer.count);
                     res.Initialized = true;
                 }

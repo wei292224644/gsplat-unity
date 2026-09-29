@@ -39,6 +39,23 @@ namespace Gsplat
 
         GsplatAsset m_prevAsset;
         GsplatRendererImpl m_renderer;
+        bool m_warnedLodCutouts;
+        bool m_warnedNoCamera;
+
+        // LoD assets draw at most the budget, so their order buffer is sized to it (spec §7).
+        uint OrderCapacity => GsplatAsset is GsplatLodAsset
+            ? GsplatSettings.Instance.LodSplatBudget
+            : GsplatAsset.SplatCount;
+
+        public bool IsLod => m_renderer?.IsLod ?? false;
+        public int LodLatencyFrames => m_renderer?.LodLatencyFrames ?? 0;
+
+        /// <summary>One synchronous traversal from Camera.main, timed. For the bench.</summary>
+        public double MeasureLodTraversalMs()
+        {
+            var camera = Camera.main;
+            return m_renderer != null && camera ? m_renderer.MeasureLodTraversalMs(camera, transform) : 0;
+        }
 
         public bool Valid => GsplatAsset &&
                              (RenderBeforeUploadComplete ? SplatCount > 0 : SplatCount == GsplatAsset.SplatCount);
@@ -139,6 +156,9 @@ namespace Gsplat
         {
             if (!GsplatAsset)
                 m_prevAsset = null;
+            // ponytail: a budget change rebinds and re-uploads the asset; only the bench changes it at runtime.
+            if (GsplatAsset && m_renderer != null && m_prevAsset == GsplatAsset && m_renderer.SplatCount != OrderCapacity)
+                m_prevAsset = null;
             if (m_prevAsset != GsplatAsset)
             {
                 m_renderer?.ReleaseGsplatAsset();
@@ -146,9 +166,9 @@ namespace Gsplat
                 if (GsplatAsset)
                 {
                     if (m_renderer == null)
-                        m_renderer = new GsplatRendererImpl(GsplatAsset.SplatCount);
+                        m_renderer = new GsplatRendererImpl(OrderCapacity);
                     else
-                        m_renderer.RecreateResources(GsplatAsset.SplatCount);
+                        m_renderer.RecreateResources(OrderCapacity);
 #if UNITY_EDITOR
                     var asyncUpload = AsyncUpload && Application.isPlaying;
 #else
@@ -162,7 +182,10 @@ namespace Gsplat
             if (Valid && GsplatSettings.Instance.Valid && GsplatSorter.Instance.Valid)
             {
                 m_renderer.EvaluateRefreshRequired(SortMode, SortRefreshRate - 1, CutoutsRefreshRate - 1);
-                m_renderer.DispatchInitOrder(Cutouts, transform.localToWorldMatrix, CutoutsUpdateBounds);
+                if (m_renderer.IsLod)
+                    UpdateLod();
+                else
+                    m_renderer.DispatchInitOrder(Cutouts, transform.localToWorldMatrix, CutoutsUpdateBounds);
                 // When the global sorter has merged all renderers into a single draw call,
                 // skip the per-renderer draw — GsplatGlobalRenderer handles rendering.
                 // Under a pipeline that owns the splat render target, the draw is recorded from
@@ -173,6 +196,29 @@ namespace Gsplat
                     m_renderer.SubmitImmediate();
                 }
             }
+        }
+
+        void UpdateLod()
+        {
+            if (!m_warnedLodCutouts && Cutouts.Length > 0)
+            {
+                Debug.LogError($"[Gsplat] '{name}': .gsd assets do not support cutouts (spec D13); they are ignored.", this);
+                m_warnedLodCutouts = true;
+            }
+
+            var camera = Camera.main;
+            if (!camera)
+            {
+                if (!m_warnedNoCamera)
+                {
+                    Debug.LogError($"[Gsplat] '{name}': LoD selection needs a camera tagged MainCamera; none found, nothing is drawn.", this);
+                    m_warnedNoCamera = true;
+                }
+
+                return;
+            }
+
+            m_renderer.UpdateLod(camera, transform, Time.frameCount);
         }
 
         void PrepareDraw() =>

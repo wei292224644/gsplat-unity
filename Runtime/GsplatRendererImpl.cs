@@ -41,6 +41,11 @@ namespace Gsplat
         public bool ComputeCutoutsRequired = true;
         Dictionary<ulong, (Vector3, Vector3)> m_prevCamTransforms;
 
+        GsplatLodDriver m_lod;
+
+        public bool IsLod => m_gsplatAsset is GsplatLodAsset;
+        public int LodLatencyFrames => m_lod?.LastLatencyFrames ?? 0;
+
         GsplatCutout.ShaderData[] m_cutoutsData;
         uint m_prevSplatCount;
 
@@ -142,10 +147,42 @@ namespace Gsplat
                 gsplatAsset.UploadDataAsync(GsplatResource);
             else
                 gsplatAsset.UploadData(GsplatResource);
+            if (gsplatAsset is GsplatLodAsset lodAsset)
+                BindLod(lodAsset);
         }
+
+        void BindLod(GsplatLodAsset asset)
+        {
+            if (GsplatLodDriver.LiveCount > 0)
+            {
+                // D12: the budget belongs to the frame; a second LoD renderer would silently double it.
+                Debug.LogError($"[Gsplat] '{asset.name}': at most one active LoD renderer is supported (spec D12); this one will not render.");
+                return;
+            }
+
+            // The order buffer was sized to the budget for LoD assets (GsplatRenderer.OrderCapacity).
+            m_lod = new GsplatLodDriver(asset, (int)SplatCount);
+        }
+
+        public void UpdateLod(Camera camera, Transform model, int frame)
+        {
+            m_bounds = m_gsplatAsset.Bounds;
+            if (m_lod == null || GsplatResource.UploadedCount < m_gsplatAsset.SplatCount)
+                return;
+            var published = m_lod.Update(camera, model, SorterResource, frame);
+            if (published < 0)
+                return;
+            m_remainingCount = (uint)published;
+            ComputeSortRequired = true; // a fresh cut is unsorted: sort it this frame whatever the interval (D11)
+        }
+
+        public double MeasureLodTraversalMs(Camera camera, Transform model) =>
+            m_lod?.MeasureTraversalMilliseconds(camera, model) ?? 0;
 
         public void ReleaseGsplatAsset()
         {
+            m_lod?.Dispose();
+            m_lod = null;
             GsplatResourceManager.Release(m_gsplatAssetID);
             GsplatResource = null;
             m_gsplatAsset = null;
