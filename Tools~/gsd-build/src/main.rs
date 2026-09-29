@@ -61,13 +61,14 @@ fn run(args: Vec<String>) -> Result<()> {
     std::fs::write(&output, &encoded).with_context(|| format!("writing {}", output.display()))?;
 
     println!(
-        "{} -> {}: {} input, {} empty dropped, {} leaves, {} nodes, SH {}, LoD {:.1}s, {:.1} MB",
+        "{} -> {}: {} input, {} empty dropped, {} leaves, {} nodes, {} levels, SH {}, LoD {:.1}s, {:.1} MB",
         input.display(),
         output.display(),
         stats.input_splats,
         stats.dropped_empty,
         stats.leaves,
         stats.nodes,
+        stats.levels,
         stats.sh_degree,
         stats.lod_seconds,
         encoded.len() as f64 / 1_048_576.0

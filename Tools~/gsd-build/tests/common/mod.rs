@@ -42,3 +42,39 @@ pub fn poison_first_x(bytes: &mut [u8]) {
     let body = bytes.windows(11).position(|w| w == b"end_header\n").unwrap() + 11;
     bytes[body..body + 4].copy_from_slice(&f32::NAN.to_le_bytes());
 }
+
+/// One splat at the origin in the standard 3DGS PLY layout with SH degree 1 only. `sh1` is
+/// coefficient-major, channel-minor (`sh1[k*3 + c]`); the file stores it channel-major
+/// (`f_rest_{c*3 + k}`), as 3DGS exports do. `q` is written as rot_0..3 = (w, x, y, z).
+pub fn one_splat_ply(sh1: &[f32; 9], q: Quat) -> Vec<u8> {
+    let mut header = String::from("ply\nformat binary_little_endian 1.0\nelement vertex 1\n");
+    let names = ["x", "y", "z", "f_dc_0", "f_dc_1", "f_dc_2"].map(String::from).into_iter()
+        .chain((0..9).map(|i| format!("f_rest_{i}")))
+        .chain(["opacity", "scale_0", "scale_1", "scale_2", "rot_0", "rot_1", "rot_2", "rot_3"].map(String::from));
+    for p in names {
+        header += &format!("property float {p}\n");
+    }
+    header += "end_header\n";
+    let mut values = vec![0.0, 0.0, 0.0, 0.1, 0.2, 0.3];
+    values.extend((0..9).map(|i| sh1[(i % 3) * 3 + i / 3]));
+    values.extend([2.0, 0.03f32.ln(), 0.02f32.ln(), 0.01f32.ln(), q.w, q.x, q.y, q.z]);
+    let mut bytes = header.into_bytes();
+    for v in values {
+        bytes.extend_from_slice(&v.to_le_bytes());
+    }
+    bytes
+}
+
+/// A `side`³ grid in the antimatter15 `.splat` layout: 32 B per splat — centre f32×3, linear scale
+/// f32×3, RGBA u8×4, quaternion u8×4 as (w, x, y, z) mapped by `q * 128 + 128`.
+pub fn synthetic_splat(side: usize) -> Vec<u8> {
+    let mut bytes = Vec::new();
+    for i in 0..side * side * side {
+        let c = [(i % side) as f32 * 0.1, ((i / side) % side) as f32 * 0.1, (i / (side * side)) as f32 * 0.1];
+        for v in c.into_iter().chain([0.03, 0.02, 0.01]) {
+            bytes.extend_from_slice(&f32::to_le_bytes(v));
+        }
+        bytes.extend_from_slice(&[200, 100, 50, 220, 255, 128, 128, 128]);
+    }
+    bytes
+}

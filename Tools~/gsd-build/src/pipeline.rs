@@ -30,6 +30,8 @@ pub struct BuildStats {
     pub dropped_empty: usize,
     pub leaves: usize,
     pub nodes: usize,
+    /// Levels from the root to the deepest leaf; a lone root is one level.
+    pub levels: usize,
     pub sh_degree: u8,
     pub lod_seconds: f64,
 }
@@ -61,8 +63,22 @@ pub fn build(bytes: &[u8], file_name: &str, options: &BuildOptions) -> Result<(G
 
     let file = gather(&splats, options.source, stats.leaves as u32)?;
     stats.nodes = file.nodes.len();
+    stats.levels = tree_levels(&file.child_start, &file.child_count);
     stats.sh_degree = file.sh_degree;
     Ok((file, stats))
+}
+
+/// Children always sit after their parent (invariant ②, checked by `gather`), so one forward pass
+/// has every parent's level before it reaches the children.
+pub fn tree_levels(child_start: &[u32], child_count: &[u16]) -> usize {
+    let mut level = vec![1usize; child_start.len()];
+    for i in 0..child_start.len() {
+        let start = child_start[i] as usize;
+        for c in start..start + usize::from(child_count[i]) {
+            level[c] = level[i] + 1;
+        }
+    }
+    level.into_iter().max().unwrap_or(0)
 }
 
 fn decode(bytes: &[u8], file_name: &str) -> Result<GsplatArray> {

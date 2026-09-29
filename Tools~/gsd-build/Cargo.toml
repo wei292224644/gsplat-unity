@@ -6,7 +6,7 @@ license = "MIT"
 description = "Builds .gsd LoD trees for the Gsplat Unity renderer"
 
 [dependencies]
-spark-lib = { git = "https://github.com/sparkjsdev/spark", rev = "967263804e637776e94395e61ab2f6cb6a04663c", default-features = false, features = ["gsplat", "ply", "spz", "tiny_lod", "bhatt_lod"] }
+spark-lib = { git = "https://github.com/sparkjsdev/spark", rev = "967263804e637776e94395e61ab2f6cb6a04663c", default-features = false, features = ["gsplat", "ply", "spz", "antisplat", "ksplat", "tiny_lod", "bhatt_lod"] }
 glam = "0.30.8"
 half = "2.6.0"
 anyhow = "1.0.98"

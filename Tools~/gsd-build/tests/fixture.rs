@@ -10,7 +10,8 @@ fn fixture_dir() -> PathBuf {
 
 /// root 0 → [1, 2]; node 1 → [3, 4, 5]; node 2 → [6, 7]: 8 nodes, 5 leaves, SH degree 3.
 /// Interiors carry D > 1, one coordinate sits near 1000 (f32 centres, D3), and the rotation angle
-/// sweeps −3..3 rad so the codec meets negative-w quaternions.
+/// sweeps −3..3 rad, so the axis meets both signs. w = cos(θ/2) stays positive (|θ| < π): the
+/// encoder's w < 0 flip is covered by `encode.rs`'s unit tests, not by this fixture.
 fn tiny() -> GsdFile {
     let child_count: [u16; 8] = [2, 3, 2, 0, 0, 0, 0, 0];
     let child_start: [u32; 8] = [1, 3, 6, 0, 0, 0, 0, 0];

@@ -1,8 +1,10 @@
 mod common;
 
+use glam::{Quat, Vec3};
+use gsd_build::encode::{unpack_ext_splat, unpack_sh1};
 use gsd_build::format;
 use gsd_build::frame::SourceFrame;
-use gsd_build::pipeline::{build, BuildOptions};
+use gsd_build::pipeline::{build, tree_levels, BuildOptions};
 
 fn options(source: SourceFrame) -> BuildOptions {
     BuildOptions { source, max_sh: None, quick: false }
@@ -16,7 +18,45 @@ fn builds_a_valid_tree_over_every_input_splat() {
     assert!(file.nodes.len() > 64, "the LoD tree must add interior nodes");
     assert!(file.child_count[0] > 0, "node 0 is the root");
     assert_eq!(file.sh_degree, 3);
+    assert_eq!(stats.levels, tree_levels(&file.child_start, &file.child_count));
+    assert!(stats.levels > 1, "an LoD tree over 64 splats has more than one level");
     assert_eq!(format::read(&format::write(&file)), Ok(file));
+}
+
+#[test]
+fn levels_count_the_root_as_one() {
+    // The fixture's shape: root 0 → [1, 2]; node 1 → [3, 4, 5]; node 2 → [6, 7].
+    assert_eq!(tree_levels(&[1, 3, 6, 0, 0, 0, 0, 0], &[2, 3, 2, 0, 0, 0, 0, 0]), 3);
+    assert_eq!(tree_levels(&[0], &[0]), 1);
+}
+
+/// Pins frame.rs's RUB rules end to end — real PLY decoder, tree build and encoder — on one splat
+/// whose rotation and SH1 are known: RUB → RUF flips z, so the quaternion's x and y change sign
+/// (each imaginary part takes the product of the other two axis signs) and SH1's z coefficient
+/// (k = 1, the odd one) changes sign; w, SH1 k = 0 (y) and k = 2 (x) are untouched.
+#[test]
+fn rub_rotation_and_sh1_come_out_in_the_unity_frame() {
+    let q = Quat::from_axis_angle(Vec3::new(1.0, 2.0, 3.0).normalize(), 1.0);
+    // On the 1/63 grid of the sint7 SH1 encoding so the round trip is exact; all distinct, all non-zero.
+    let sh1: [f32; 9] = std::array::from_fn(|j| (4 * (j as i32 + 1)) as f32 * if j % 2 == 0 { 1.0 } else { -1.0 } / 63.0);
+    let (file, stats) = build(&common::one_splat_ply(&sh1, q), "one.ply", &options(SourceFrame::Rub)).unwrap();
+    assert_eq!((stats.leaves, file.nodes.len(), file.sh_degree), (1, 1, 1));
+
+    let got = unpack_ext_splat(&file.nodes[0]).quat;
+    let expected = Quat::from_xyzw(-q.x, -q.y, q.z, q.w);
+    for (g, e) in got.to_array().into_iter().zip(expected.to_array()) {
+        assert!((g - e).abs() < 2e-3, "quaternion {got:?}, expected {expected:?}");
+    }
+
+    let signs = [1.0, -1.0, 1.0];
+    let expected_sh1: [f32; 9] = std::array::from_fn(|j| sh1[j] * signs[j / 3]);
+    assert_eq!(unpack_sh1(&file.sh1[0]), expected_sh1);
+}
+
+#[test]
+fn antisplat_input_decodes() {
+    let (file, stats) = build(&common::synthetic_splat(3), "synthetic.splat", &options(SourceFrame::Ruf)).unwrap();
+    assert_eq!((stats.leaves, file.leaf_count, file.sh_degree), (27, 27, 0));
 }
 
 #[test]
