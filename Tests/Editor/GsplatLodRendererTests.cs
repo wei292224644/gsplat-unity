@@ -7,6 +7,7 @@ using NUnit.Framework;
 using UnityEditor;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 
@@ -144,6 +145,109 @@ namespace Gsplat.Tests
             {
                 Object.DestroyImmediate(nonLodAsset);
             }
+        }
+
+        [Test]
+        public void ARefusedLodRendererBindsOnceTheSlotFrees()
+        {
+            var first = CreateRenderer("first");
+            first.Update();
+            var second = CreateRenderer("second");
+            LogAssert.Expect(LogType.Error, new Regex("at most one active LoD renderer"));
+            second.Update();
+            second.Update(); // still refused: reported once, not every frame (an unexpected error fails the test)
+            Assert.AreEqual(0u, second.RemainingCount);
+
+            Object.DestroyImmediate(first.gameObject); // e.g. its additive content scene was unloaded
+            second.Update();
+            Assert.AreEqual(1, GsplatLodDriver.LiveCount);
+            Assert.That(second.RemainingCount, Is.InRange(1u, 4u),
+                "a D12 refusal must end when the slot frees, or a .gsd in a newly loaded scene never draws");
+
+            // After the recovery, a new refusal is a new event and is reported again.
+            second.GsplatAsset = null;
+            second.Update();
+            CreateRenderer("third").Update();
+            second.GsplatAsset = m_asset;
+            LogAssert.Expect(LogType.Error, new Regex("at most one active LoD renderer"));
+            second.Update();
+        }
+
+        [TestCase(GsplatRenderer.GsplatSortMode.Always)]
+        [TestCase(GsplatRenderer.GsplatSortMode.CutoutsEveryNSorts)]
+        public void ReloadingAPlainAssetWithACutoutKeepsDrawingIt(GsplatRenderer.GsplatSortMode mode)
+        {
+            var asset = CreateNonLodAsset(6);
+            var renderer = Create("plain").AddComponent<GsplatRenderer>();
+            renderer.GsplatAsset = asset;
+            renderer.SortMode = mode;
+            renderer.CutoutsRefreshRate = 1000; // on its own, the schedule would not recompute cutouts for 999 sorts
+            var cutout = Create("cutout").AddComponent<GsplatCutout>(); // a unit ellipsoid around every splat
+            cutout.transform.SetParent(renderer.transform);
+            GsplatCutout.m_RegisteredCutouts.Add(cutout); // edit mode does not run its OnEnable
+            try
+            {
+                renderer.Update();
+                Assume.That(renderer.RemainingCount, Is.EqualTo(6u));
+
+                renderer.ReloadAsset(); // what GsplatImporter does on every re-import
+                renderer.Update();
+                Assert.AreEqual(6u, renderer.RemainingCount,
+                    "a rebind zeroes the drawn count, so the cutout pass must run again even though " +
+                    "neither the cutouts nor the splat count changed");
+            }
+            finally
+            {
+                GsplatCutout.m_RegisteredCutouts.Remove(cutout);
+                Object.DestroyImmediate(asset);
+            }
+        }
+
+        [Test]
+        public void SwitchingFromLodToAPlainAssetIdentityFillsItsOrder()
+        {
+            var renderer = CreateRenderer("lod");
+            renderer.Update();
+            Assume.That(renderer.SorterResource.Initialized, "the LoD cut owns the order buffer (D14)");
+
+            // As many splats as the budget, so the order buffer is reused and still holds the cut.
+            var plain = CreateNonLodAsset(4);
+            try
+            {
+                renderer.GsplatAsset = plain;
+                renderer.Update();
+                Assert.IsFalse(renderer.IsLod);
+                Assert.AreEqual(0, GsplatLodDriver.LiveCount);
+                Assert.AreEqual(4u, renderer.RemainingCount);
+                Assert.IsFalse(renderer.SorterResource.Initialized, "the plain asset's first sort must identity-fill");
+
+                // Run the sort the pipeline would run and read back the order it leaves.
+                var camera = Camera.main;
+                Assert.IsTrue(GsplatSorter.Instance.GatherGsplatsForCamera(camera));
+                using var cmd = new CommandBuffer();
+                GsplatSorter.Instance.DispatchSort(cmd, camera);
+                Graphics.ExecuteCommandBuffer(cmd);
+                var order = new uint[4];
+                renderer.SorterResource.OrderBuffer.GetData(order);
+                // A valid cut never holds the root together with its descendants, so 0..3 can only
+                // come from the identity fill.
+                CollectionAssert.AreEquivalent(new uint[] { 0, 1, 2, 3 }, order);
+                Assert.IsTrue(renderer.SorterResource.Initialized);
+            }
+            finally
+            {
+                Object.DestroyImmediate(plain);
+            }
+        }
+
+        [Test]
+        public void AZeroBudgetIsClampedInsteadOfThrowing()
+        {
+            GsplatSettings.Instance.LodSplatBudget = 0;
+            var renderer = CreateRenderer("lod");
+            renderer.Update();
+            Assert.AreEqual(1, renderer.SorterResource.OrderBuffer.count);
+            Assert.That(renderer.RemainingCount, Is.InRange(0u, 1u));
         }
 
         [Test]

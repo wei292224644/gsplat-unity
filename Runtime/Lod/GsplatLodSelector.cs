@@ -58,7 +58,10 @@ namespace Gsplat
             return true;
         }
 
-        /// <summary>Publishes the traversal in flight if it has finished; the array is valid until the next schedule.</summary>
+        /// <summary>
+        /// Publishes the traversal in flight if it has finished. The array views the selector's
+        /// scratch, so it is valid only until the next <see cref="TrySchedule"/> or <see cref="RunNow"/>.
+        /// </summary>
         public bool TryComplete(int frame, out NativeArray<uint> indices)
         {
             indices = default;

@@ -1,6 +1,7 @@
 ﻿// Copyright (c) 2025 Yize Wu
 // SPDX-License-Identifier: MIT
 
+using System;
 using System.Linq;
 using UnityEditor;
 using UnityEngine;
@@ -50,7 +51,7 @@ namespace Gsplat
 
         // LoD assets draw at most the budget, so their order buffer is sized to it (spec §7).
         uint OrderCapacity => GsplatAsset is GsplatLodAsset
-            ? GsplatSettings.Instance.LodSplatBudget
+            ? Math.Max(1u, GsplatSettings.Instance.LodSplatBudget) // a zero-length buffer throws
             : GsplatAsset.SplatCount;
 
         public bool IsLod => m_renderer?.IsLod ?? false;
@@ -220,26 +221,26 @@ namespace Gsplat
             }
         }
 
+        // Both warnings report entering a state, once; leaving it re-arms them, so the next time
+        // it happens is reported again.
         void UpdateLod()
         {
-            if (!m_warnedLodCutouts && Cutouts.Length > 0)
-            {
+            var hasCutouts = Cutouts.Length > 0;
+            if (hasCutouts && !m_warnedLodCutouts)
                 Debug.LogError($"[Gsplat] '{name}': .gsd assets do not support cutouts (spec D13); they are ignored.", this);
-                m_warnedLodCutouts = true;
-            }
+            m_warnedLodCutouts = hasCutouts;
 
             var camera = Camera.main;
             if (!camera)
             {
                 if (!m_warnedNoCamera)
-                {
-                    Debug.LogError($"[Gsplat] '{name}': LoD selection needs a camera tagged MainCamera; none found, nothing is drawn.", this);
-                    m_warnedNoCamera = true;
-                }
-
+                    Debug.LogError($"[Gsplat] '{name}': LoD selection needs a camera tagged MainCamera; none found, so the " +
+                                   "selection stops: the last published cut keeps drawing, or nothing if there is none yet.", this);
+                m_warnedNoCamera = true;
                 return;
             }
 
+            m_warnedNoCamera = false;
             m_renderer.UpdateLod(camera, transform, Time.frameCount);
         }
 

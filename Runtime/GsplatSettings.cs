@@ -60,7 +60,15 @@ namespace Gsplat
                         if (settings.LodSplatBudget == 0)
                             settings.SetLodDefaults();
                         if (settings.Materials == null || settings.Materials.Length != materialCount)
-                            settings.Materials = DefaultMaterials;
+                        {
+                            // Keep whatever the user put in the existing slots; fill only the added ones.
+                            var kept = settings.Materials?.Length ?? 0;
+                            Array.Resize(ref settings.Materials, materialCount);
+                            var defaults = DefaultMaterials;
+                            for (var i = kept; i < materialCount; ++i)
+                                settings.Materials[i] = defaults[i];
+                        }
+
                         EditorUtility.SetDirty(settings);
                         AssetDatabase.SaveAssets();
                     }
@@ -109,7 +117,7 @@ namespace Gsplat
         [Header("LoD (.gsd assets)")]
         [Tooltip("Most splats a .gsd asset draws per frame. A frame-level budget, not a per-renderer one: " +
                  "at most one LoD renderer may be active at a time (spec D12).")]
-        public uint LodSplatBudget;
+        [Min(1)] public uint LodSplatBudget;
 
         [Tooltip("Full-width cone (degrees) around the view direction that keeps full LoD detail.")]
         [Range(0f, 180f)] public float LodConeFov0;

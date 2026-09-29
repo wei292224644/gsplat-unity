@@ -42,6 +42,9 @@ namespace Gsplat
         Dictionary<ulong, (Vector3, Vector3)> m_prevCamTransforms;
 
         GsplatLodDriver m_lod;
+        // D12 refused this binding. Not permanent: it binds as soon as the live LoD renderer goes
+        // away (e.g. its additive scene unloads), so a .gsd in the scene loaded next still draws.
+        bool m_lodRefused;
 
         public bool IsLod => m_gsplatAsset is GsplatLodAsset;
         public int LodLatencyFrames => m_lod?.LastLatencyFrames ?? 0;
@@ -156,10 +159,15 @@ namespace Gsplat
             if (GsplatLodDriver.LiveCount > 0)
             {
                 // D12: the budget belongs to the frame; a second LoD renderer would silently double it.
-                Debug.LogError($"[Gsplat] '{asset.name}': at most one active LoD renderer is supported (spec D12); this one will not render.");
+                // Logged once per refused binding: UpdateLod only retries once the slot is free.
+                Debug.LogError($"[Gsplat] '{asset.name}': at most one active LoD renderer is supported (spec D12); " +
+                               "this one draws nothing until the active one is released, then binds by itself.");
+                m_lodRefused = true;
                 return;
             }
 
+            // Cleared first: a driver that throws while building is not retried every frame.
+            m_lodRefused = false;
             // The order buffer was sized to the budget for LoD assets (GsplatRenderer.OrderCapacity).
             m_lod = new GsplatLodDriver(asset, (int)SplatCount);
         }
@@ -167,6 +175,8 @@ namespace Gsplat
         public void UpdateLod(Camera camera, Transform model, int frame)
         {
             m_bounds = m_gsplatAsset.Bounds;
+            if (m_lodRefused && GsplatLodDriver.LiveCount == 0)
+                BindLod((GsplatLodAsset)m_gsplatAsset);
             if (m_lod == null || GsplatResource.UploadedCount < m_gsplatAsset.SplatCount)
                 return;
             var published = m_lod.Update(camera, model, SorterResource, frame);
@@ -183,6 +193,7 @@ namespace Gsplat
         {
             m_lod?.Dispose();
             m_lod = null;
+            m_lodRefused = false;
             GsplatResourceManager.Release(m_gsplatAssetID);
             GsplatResource = null;
             m_gsplatAsset = null;
@@ -195,6 +206,12 @@ namespace Gsplat
             m_remainingCount = 0;
             if (SorterResource != null)
                 SorterResource.Initialized = false;
+            // With the count zeroed, whatever gates DispatchInitOrder's recompute must not survive
+            // either: its "cutouts unchanged, same splat count" cache would skip the next binding's
+            // cutout pass (every re-import of the same asset), and so would the cutout schedule.
+            m_cutoutsData = Array.Empty<GsplatCutout.ShaderData>();
+            m_prevSplatCount = 0;
+            ForceRefresh();
         }
 
         void CreateResources(uint splatCount)
