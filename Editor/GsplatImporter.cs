@@ -40,6 +40,8 @@ namespace Gsplat.Editor
                 CompressionMode.Spark => isSpz
                     ? ScriptableObject.CreateInstance<GsplatAssetSpz>()
                     : ScriptableObject.CreateInstance<GsplatAssetSpark>(),
+                CompressionMode.Lod => throw new NotSupportedException(
+                    ".ply/.spz import supports Uncompressed or Spark; LoD assets come from gsd-build as .gsd files."),
                 _ => throw new ArgumentOutOfRangeException()
             };
 

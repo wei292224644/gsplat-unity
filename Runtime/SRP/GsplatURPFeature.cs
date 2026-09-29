@@ -65,10 +65,6 @@ namespace Gsplat
             // is meant to buy back.
             const GraphicsFormat k_offscreenFormat = GraphicsFormat.R16G16B16A16_SFloat;
 
-            // Below this the composite's bilinear upsample stops hiding the loss and splat edges
-            // visibly step. Matches the range on GsplatSettings.OffscreenScale.
-            const float k_minOffscreenScale = 0.25f;
-
             const string k_offscreenPassName = "Gsplat.Offscreen";
             const string k_compositePassName = "Gsplat.Composite";
             const string k_offscreenTextureName = "_GsplatOffscreen";
@@ -123,7 +119,7 @@ namespace Gsplat
                 desc.autoGenerateMips = false;
                 desc.bindMS = false;
 
-                var scale = Mathf.Clamp(GsplatSettings.Instance.OffscreenScale, k_minOffscreenScale, 1f);
+                var scale = GsplatSettings.Instance.EffectiveOffscreenScale;
                 desc.width = Mathf.Max(1, Mathf.RoundToInt(cameraWidth * scale));
                 desc.height = Mathf.Max(1, Mathf.RoundToInt(cameraHeight * scale));
 

@@ -44,7 +44,9 @@ namespace Gsplat
                     // Checked outside the version ladder below: those branches are chained with
                     // else-if, so an asset upgrading from an early version takes one branch, stamps
                     // the current version, and never picks up fields added by the later ones.
-                    if (!settings.CompositeShader || settings.OffscreenScale <= 0f)
+                    var materialCount = Enum.GetValues(typeof(CompressionMode)).Length;
+                    if (!settings.CompositeShader || settings.OffscreenScale <= 0f || settings.LodSplatBudget == 0 ||
+                        settings.Materials == null || settings.Materials.Length != materialCount)
                     {
                         if (!settings.CompositeShader)
                             settings.CompositeShader = DefaultCompositeShader;
@@ -53,6 +55,12 @@ namespace Gsplat
                         // range minimum, which would silently pick a scale nobody chose.
                         if (settings.OffscreenScale <= 0f)
                             settings.OffscreenScale = k_defaultOffscreenScale;
+                        // The LoD fields and the Lod material slot arrived with .gsd support: an older
+                        // asset reads them back as 0 and as a Materials array one entry short.
+                        if (settings.LodSplatBudget == 0)
+                            settings.SetLodDefaults();
+                        if (settings.Materials == null || settings.Materials.Length != materialCount)
+                            settings.Materials = DefaultMaterials;
                         EditorUtility.SetDirty(settings);
                         AssetDatabase.SaveAssets();
                     }
@@ -97,6 +105,43 @@ namespace Gsplat
             + "full resolution. 1 renders at camera resolution.")]
         [Range(0.25f, 1f)]
         public float OffscreenScale;
+
+        [Header("LoD (.gsd assets)")]
+        [Tooltip("Most splats a .gsd asset draws per frame. A frame-level budget, not a per-renderer one: " +
+                 "at most one LoD renderer may be active at a time (spec D12).")]
+        public uint LodSplatBudget;
+
+        [Tooltip("Full-width cone (degrees) around the view direction that keeps full LoD detail.")]
+        [Range(0f, 180f)] public float LodConeFov0;
+
+        [Tooltip("Full-width cone (degrees) at whose edge detail has fallen to LodConeFoveate.")]
+        [Range(0f, 180f)] public float LodConeFov;
+
+        [Tooltip("Detail scale at the LodConeFov edge.")]
+        [Range(0.01f, 1f)] public float LodConeFoveate;
+
+        [Tooltip("Detail scale behind the viewer. 0.2 makes splats behind you about 5x larger.")]
+        [Range(0.01f, 1f)] public float LodBehindFoveate;
+
+        // Below this the composite's bilinear upsample stops hiding the loss and splat edges visibly
+        // step. Matches the [Range] on OffscreenScale.
+        const float k_minOffscreenScale = 0.25f;
+        const uint k_defaultLodSplatBudget = 500000;
+
+        /// <summary>
+        /// The offscreen scale the URP pass actually renders at. The LoD selection sizes its pixel
+        /// threshold from the same value (spec D16), so both read it here.
+        /// </summary>
+        public float EffectiveOffscreenScale => Mathf.Clamp(OffscreenScale, k_minOffscreenScale, 1f);
+
+        void SetLodDefaults()
+        {
+            LodSplatBudget = k_defaultLodSplatBudget;
+            LodConeFov0 = 90f;
+            LodConeFov = 120f;
+            LodConeFoveate = 0.4f;
+            LodBehindFoveate = 0.2f;
+        }
 
         [Tooltip(
             "When enabled, 2+ active Gaussian splat renderers are merged into a single globally depth-sorted draw call.")]
@@ -155,6 +200,9 @@ namespace Gsplat
                 materials[(int)CompressionMode.Spark] =
                     AssetDatabase.LoadAssetAtPath<GsplatMaterial>(GsplatUtils.k_PackagePath +
                                                                   "Runtime/Materials/GsplatSpark.asset");
+                materials[(int)CompressionMode.Lod] =
+                    AssetDatabase.LoadAssetAtPath<GsplatMaterial>(GsplatUtils.k_PackagePath +
+                                                                  "Runtime/Materials/GsplatLod.asset");
                 return materials;
             }
         }
@@ -166,6 +214,7 @@ namespace Gsplat
             GlobalMaterial = DefaultGlobalMaterial;
             CompositeShader = DefaultCompositeShader;
             OffscreenScale = k_defaultOffscreenScale;
+            SetLodDefaults();
             Materials = DefaultMaterials;
             SplatInstanceSize = 128;
             UploadBatchSize = 100000;

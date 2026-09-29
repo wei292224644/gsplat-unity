@@ -92,4 +92,38 @@ namespace Gsplat
             PackedSH4Buffer = null;
         }
     }
+
+    public class GsplatResourceLod : GsplatResource
+    {
+        /// <summary>Two uint4 per node, uploaded straight from the .gsd Nodes section.</summary>
+        public GraphicsBuffer NodesBuffer { get; private set; }
+        public GraphicsBuffer PackedSH1Buffer { get; private set; }
+        public GraphicsBuffer PackedSH2Buffer { get; private set; }
+        public GraphicsBuffer PackedSH3Buffer { get; private set; }
+
+        public GsplatResourceLod(uint nodeCount, byte shBands)
+        {
+            if (nodeCount == 0)
+                return;
+            NodesBuffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, (int)nodeCount * 2, sizeof(uint) * 4);
+            if (shBands >= 1)
+                PackedSH1Buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, (int)nodeCount, sizeof(uint) * 2);
+            if (shBands >= 2)
+                PackedSH2Buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, (int)nodeCount, sizeof(uint) * 4);
+            if (shBands >= 3)
+                PackedSH3Buffer = new GraphicsBuffer(GraphicsBuffer.Target.Structured, (int)nodeCount, sizeof(uint) * 4);
+        }
+
+        public override void Dispose()
+        {
+            NodesBuffer?.Dispose();
+            NodesBuffer = null;
+            PackedSH1Buffer?.Dispose();
+            PackedSH1Buffer = null;
+            PackedSH2Buffer?.Dispose();
+            PackedSH2Buffer = null;
+            PackedSH3Buffer?.Dispose();
+            PackedSH3Buffer = null;
+        }
+    }
 }

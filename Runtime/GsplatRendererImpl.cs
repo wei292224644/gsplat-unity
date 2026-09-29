@@ -63,7 +63,7 @@ namespace Gsplat
         }
 
         public void ComputeDepth(CommandBuffer cmd, Matrix4x4 matrixMv) =>
-            m_gsplatAsset.ComputeDepth(cmd, matrixMv, SorterResource, GsplatResource);
+            m_gsplatAsset.ComputeDepth(cmd, matrixMv, SorterResource, GsplatResource, m_remainingCount);
 
         Bounds ExtractBounds()
         {

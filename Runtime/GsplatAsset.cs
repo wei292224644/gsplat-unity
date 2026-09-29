@@ -15,7 +15,9 @@ namespace Gsplat
     public enum CompressionMode
     {
         Uncompressed,
-        Spark
+        Spark,
+        /// <summary>A LoD tree from a .gsd file (see <see cref="GsplatLodAsset"/>). Not an import option for .ply/.spz.</summary>
+        Lod
     }
 
     /// <summary>
@@ -215,8 +217,10 @@ namespace Gsplat
 
         public abstract void SetupMaterialPropertyBlock(MaterialPropertyBlock propertyBlock, GsplatResource resource);
 
+        /// <param name="activeCount">Entries of the order buffer in use this frame. Assets that
+        /// depth-sort every uploaded splat ignore it; LoD assets sort only the selected cut.</param>
         public abstract void ComputeDepth(CommandBuffer cmd, Matrix4x4 matrixMv,
-            ISorterResource sorterResource, GsplatResource resource);
+            ISorterResource sorterResource, GsplatResource resource, uint activeCount);
 
         public abstract void InitOrder(ISorterResource sorterResource, GsplatResource resource,
             bool updateBounds);

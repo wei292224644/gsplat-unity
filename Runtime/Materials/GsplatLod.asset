@@ -1,0 +1,17 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b7c727244cd14cfd896562aa99c958f3, type: 3}
+  m_Name: GsplatLod
+  m_EditorClassIdentifier: Gsplat::Gsplat.GsplatMaterial
+  DefaultMaterial: {fileID: 2100000, guid: 4d0d2b57008994f8dbf25b2c342bc2b0, type: 2}
+  CalcDepthShader: {fileID: 7200000, guid: 9edebea4ebe0f42a9843e7e05028819c, type: 3}
+  InitOrderShader: {fileID: 0}

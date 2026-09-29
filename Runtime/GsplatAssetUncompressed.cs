@@ -95,7 +95,7 @@ namespace Gsplat
         }
 
         public override void ComputeDepth(CommandBuffer cmd, Matrix4x4 matrixMv,
-            ISorterResource sorterResource, GsplatResource resource)
+            ISorterResource sorterResource, GsplatResource resource, uint activeCount)
         {
             var res = (GsplatResourceUncompressed)resource;
             var cs = GsplatMaterial.CalcDepthShader;
