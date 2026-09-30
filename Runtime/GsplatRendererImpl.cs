@@ -160,7 +160,9 @@ namespace Gsplat
             {
                 // D12: the budget belongs to the frame; a second LoD renderer would silently double it.
                 // Logged once per refused binding: UpdateLod only retries once the slot is free.
-                Debug.LogError($"[Gsplat] '{asset.name}': at most one active LoD renderer is supported (spec D12); " +
+                // A warning, not an error: every additive switch between two .gsd scenes passes through here
+                // and recovers by itself (D20).
+                Debug.LogWarning($"[Gsplat] '{asset.name}': at most one active LoD renderer is supported (spec D12); " +
                                "this one draws nothing until the active one is released, then binds by itself.");
                 m_lodRefused = true;
                 return;

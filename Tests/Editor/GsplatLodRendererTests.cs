@@ -134,7 +134,7 @@ namespace Gsplat.Tests
                     "the non-LoD asset must render normally before the switch");
 
                 second.GsplatAsset = m_asset;
-                LogAssert.Expect(LogType.Error, new Regex("at most one active LoD renderer"));
+                LogAssert.Expect(LogType.Warning, new Regex("at most one active LoD renderer"));
                 second.Update();
 
                 Assert.AreEqual(0u, second.RemainingCount,
@@ -153,9 +153,10 @@ namespace Gsplat.Tests
             var first = CreateRenderer("first");
             first.Update();
             var second = CreateRenderer("second");
-            LogAssert.Expect(LogType.Error, new Regex("at most one active LoD renderer"));
+            LogAssert.Expect(LogType.Warning, new Regex("at most one active LoD renderer"));
             second.Update();
-            second.Update(); // still refused: reported once, not every frame (an unexpected error fails the test)
+            second.Update(); // still refused: reported once, not every frame
+            LogAssert.NoUnexpectedReceived(); // a warning is not a failing log by itself
             Assert.AreEqual(0u, second.RemainingCount);
 
             Object.DestroyImmediate(first.gameObject); // e.g. its additive content scene was unloaded
@@ -169,7 +170,7 @@ namespace Gsplat.Tests
             second.Update();
             CreateRenderer("third").Update();
             second.GsplatAsset = m_asset;
-            LogAssert.Expect(LogType.Error, new Regex("at most one active LoD renderer"));
+            LogAssert.Expect(LogType.Warning, new Regex("at most one active LoD renderer"));
             second.Update();
         }
 
@@ -279,7 +280,8 @@ namespace Gsplat.Tests
                 "clearing the asset must release the driver, or D12 starves every later LoD renderer");
 
             var b = CreateRenderer("b");
-            b.Update(); // must not log the D12 error — LogAssert fails the test on any unexpected error
+            b.Update();
+            LogAssert.NoUnexpectedReceived(); // must not log the D12 warning
             Assert.IsTrue(b.IsLod);
             Assert.Greater(b.RemainingCount, 0u);
         }
@@ -301,7 +303,7 @@ namespace Gsplat.Tests
         {
             var first = CreateRenderer("first");
             first.Update();
-            LogAssert.Expect(LogType.Error, new Regex("at most one active LoD renderer"));
+            LogAssert.Expect(LogType.Warning, new Regex("at most one active LoD renderer"));
             var second = CreateRenderer("second");
             second.Update();
             Assert.Greater(first.RemainingCount, 0u);
